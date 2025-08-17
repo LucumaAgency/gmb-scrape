@@ -226,6 +226,8 @@ def cli_mode():
         scraper.init_driver()
         
         print(f"🚀 Buscando '{args.query}'...")
+        print(f"   - Máximo {args.max_results} resultados por ubicación")
+        print(f"   - Total estimado: {len(selected_locations) * args.max_results} negocios")
         total_found = 0
         total_with_emails = 0
         
