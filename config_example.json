@@ -1,0 +1,20 @@
+{
+  "locations": [
+    ["Lima", "Lima", "Miraflores"],
+    ["Lima", "Lima", "San Isidro"],
+    ["Lima", "Lima", "Barranco"],
+    ["Cusco", "Cusco", "Cusco"],
+    ["Arequipa", "Arequipa", "Arequipa"]
+  ],
+  "filters": {
+    "min_rating": 4.0,
+    "min_reviews": 10,
+    "min_age_days": 180,
+    "max_age_days": 3650
+  },
+  "search_terms": [
+    "restaurantes",
+    "hoteles",
+    "tiendas"
+  ]
+}

@@ -1,0 +1,9 @@
+{
+  "name": "gmb-scraper-peru",
+  "version": "1.0.0",
+  "description": "Google My Business scraper for Peru",
+  "scripts": {
+    "install-deps": "pip install -r requirements.txt",
+    "start": "python main.py"
+  }
+}
