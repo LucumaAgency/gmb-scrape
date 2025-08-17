@@ -176,28 +176,55 @@ class GMBFastScraper:
             
             # Verificar que estamos en la página de detalle (no en la lista)
             detail_opened = False
+            
+            # Método 1: Buscar botón de volver
             try:
-                # Buscar el botón de volver que indica que estamos en detalle
                 back_selectors = [
                     'button[aria-label*="Back"]',
                     'button[aria-label*="back"]', 
                     'button[aria-label*="Atrás"]',
-                    'button[aria-label*="Volver"]'
+                    'button[aria-label*="Volver"]',
+                    'button[jsaction*="back"]',
+                    'button.VfPpkd-icon-LgbsSe'  # Clase común del botón back
                 ]
                 for selector in back_selectors:
                     try:
                         self.driver.find_element(By.CSS_SELECTOR, selector)
                         detail_opened = True
+                        logger.debug(f"Found back button with selector: {selector}")
                         break
                     except:
                         continue
             except:
                 pass
             
-            # Si no se abrió el detalle, devolver None
+            # Método 2: Verificar si hay h1 con nombre (no "Resultados")
             if not detail_opened:
-                logger.debug("Detail page not opened, skipping")
-                return None
+                try:
+                    h1_elements = self.driver.find_elements(By.CSS_SELECTOR, 'h1')
+                    for h1 in h1_elements:
+                        text = h1.text.strip()
+                        if text and text not in ['Resultados', 'Results', 'Search results', '']:
+                            detail_opened = True
+                            logger.debug(f"Found business name h1: {text[:30]}...")
+                            break
+                except:
+                    pass
+            
+            # Método 3: Buscar información de teléfono/dirección que indica detalle
+            if not detail_opened:
+                try:
+                    # Si encontramos botones de teléfono o sitio web, estamos en detalle
+                    if self.driver.find_elements(By.CSS_SELECTOR, 'button[data-tooltip*="phone"], button[data-tooltip*="Phone"], a[data-tooltip*="website"], a[data-tooltip*="Website"]'):
+                        detail_opened = True
+                        logger.debug("Found phone/website buttons - detail page confirmed")
+                except:
+                    pass
+            
+            # Si aún no detectamos el detalle, intentar continuar de todos modos
+            if not detail_opened:
+                logger.warning("Could not confirm detail page, attempting extraction anyway")
+                # No retornar None, intentar extraer de todos modos
             
             # 1. EXTRAER NOMBRE - Mejorado para evitar capturar "Resultados"
             try:
@@ -272,6 +299,9 @@ class GMBFastScraper:
                 # Si no hay botón, intentar navegador back
                 self.driver.back()
                 self.quick_delay(1, 1.5)
+            
+            # Log resultado extraído
+            logger.info(f"Extracted: {business_info['name'][:30] if business_info['name'] != 'N/A' else 'N/A'} | Phone: {business_info['phone'] != 'N/A'} | Web: {business_info['website'] != 'N/A'}")
             
             return business_info
             
