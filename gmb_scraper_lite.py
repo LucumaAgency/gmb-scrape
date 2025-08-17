@@ -5,10 +5,12 @@ from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.common.keys import Keys
 from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.chrome.options import Options
+from selenium.webdriver.common.action_chains import ActionChains
 from webdriver_manager.chrome import ChromeDriverManager
 import time
 import json
 import re
+import random
 from datetime import datetime, timedelta
 from dateutil import parser
 try:
@@ -34,6 +36,15 @@ class GMBScraper:
         self.driver = None
         self.headless = headless
         self.results = []
+        self.max_results_per_location = 10  # Limit to 10 results
+        self.user_agents = [
+            'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36',
+            'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/118.0.0.0 Safari/537.36',
+            'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36',
+            'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36 Edg/120.0.0.0',
+            'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36 Edg/119.0.0.0',
+        ]
         
     def init_driver(self):
         options = Options()
@@ -42,14 +53,79 @@ class GMBScraper:
         options.add_argument('--no-sandbox')
         options.add_argument('--disable-dev-shm-usage')
         options.add_argument('--disable-blink-features=AutomationControlled')
-        options.add_argument('--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36')
+        
+        # Random user agent
+        user_agent = random.choice(self.user_agents)
+        options.add_argument(f'--user-agent={user_agent}')
+        logger.info(f"Using User-Agent: {user_agent[:50]}...")
+        
+        # Random window size
+        width = random.randint(1200, 1920)
+        height = random.randint(800, 1080)
+        options.add_argument(f'--window-size={width},{height}')
+        
         options.add_experimental_option("excludeSwitches", ["enable-automation"])
         options.add_experimental_option('useAutomationExtension', False)
         
-        # Use webdriver-manager to automatically download the correct driver
+        # Additional anti-detection
+        options.add_argument('--disable-features=AutomationControlled')
+        
         service = Service(ChromeDriverManager().install())
         self.driver = webdriver.Chrome(service=service, options=options)
+        
+        # Execute script to remove webdriver property
+        self.driver.execute_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
+        
         self.wait = WebDriverWait(self.driver, 20)
+        self.actions = ActionChains(self.driver)
+        
+    def random_delay(self, min_seconds=1, max_seconds=3):
+        """Random delay to simulate human behavior"""
+        delay = random.uniform(min_seconds, max_seconds)
+        time.sleep(delay)
+        
+    def random_mouse_movement(self):
+        """Simulate random mouse movements"""
+        try:
+            # Move mouse to random position
+            x = random.randint(100, 800)
+            y = random.randint(100, 600)
+            self.actions.move_by_offset(x, y).perform()
+            self.random_delay(0.1, 0.3)
+            # Reset mouse position
+            self.actions.move_by_offset(-x, -y).perform()
+        except:
+            pass
+            
+    def human_scroll(self, element):
+        """Scroll like a human - gradually"""
+        try:
+            scroll_pause = random.uniform(0.5, 1.5)
+            last_height = self.driver.execute_script("return arguments[0].scrollHeight", element)
+            
+            scroll_count = 0
+            max_scrolls = 3  # Limit scrolls to avoid detection
+            
+            while scroll_count < max_scrolls:
+                # Scroll a random amount
+                scroll_amount = random.randint(300, 700)
+                self.driver.execute_script(f"arguments[0].scrollTop += {scroll_amount}", element)
+                
+                self.random_delay(scroll_pause, scroll_pause + 1)
+                
+                new_height = self.driver.execute_script("return arguments[0].scrollHeight", element)
+                if new_height == last_height:
+                    break
+                    
+                last_height = new_height
+                scroll_count += 1
+                
+                # Random mouse movement during scroll
+                if random.random() > 0.5:
+                    self.random_mouse_movement()
+                    
+        except Exception as e:
+            logger.debug(f"Error during scroll: {e}")
         
     def search_business(self, query, location):
         try:
@@ -58,90 +134,83 @@ class GMBScraper:
             
             logger.info(f"Loading URL: {url}")
             self.driver.get(url)
-            time.sleep(5)  # Give more time for initial load
             
-            # Check if we need to accept cookies or dismiss popups
+            # Random delay after page load
+            self.random_delay(3, 6)
+            
+            # Random mouse movement
+            self.random_mouse_movement()
+            
+            # Check if we need to accept cookies
             try:
                 accept_button = self.driver.find_element(By.XPATH, "//button[contains(text(), 'Accept') or contains(text(), 'Aceptar')]")
+                self.random_delay(0.5, 1)
                 accept_button.click()
-                time.sleep(2)
+                self.random_delay(1, 2)
             except:
                 pass
             
-            # Try multiple selectors for the results container
-            results_container = None
-            selectors = [
-                'div[role="feed"]',
-                'div[role="main"]',
-                'div[class*="m6QErb"][role="feed"]',
-                'div[class*="m6QErb"]'
-            ]
+            # Wait for results with random delay
+            self.random_delay(2, 4)
             
-            for selector in selectors:
-                try:
-                    results_container = self.wait.until(
-                        EC.presence_of_element_located((By.CSS_SELECTOR, selector)),
-                        timeout=5
-                    )
-                    if results_container:
-                        logger.debug(f"Found results container with selector: {selector}")
-                        break
-                except:
-                    continue
-            
-            if not results_container:
-                logger.error("Could not find results container")
-                return []
-            
-            last_height = 0
-            scroll_attempts = 0
-            max_scrolls = 10
-            
-            while scroll_attempts < max_scrolls:
-                self.driver.execute_script("arguments[0].scrollTop = arguments[0].scrollHeight", results_container)
-                time.sleep(2)
-                
-                new_height = self.driver.execute_script("return arguments[0].scrollHeight", results_container)
-                if new_height == last_height:
-                    break
-                    
-                last_height = new_height
-                scroll_attempts += 1
-            
-            # Try multiple selectors for business elements
-            business_selectors = [
-                'div[role="feed"] > div > div[jsaction]',
-                'div[role="article"]',
-                'a[href*="/maps/place/"]',
-                'div[class*="Nv2PK"]',
-                'div[class*="bfdHYd"]'
-            ]
-            
+            # Find business elements using the selectors that work
             business_elements = []
-            for selector in business_selectors:
-                elements = self.driver.find_elements(By.CSS_SELECTOR, selector)
-                if elements:
-                    business_elements = elements
-                    logger.info(f"Found {len(elements)} businesses with selector: {selector}")
-                    break
+            
+            # Primary selector - links to places
+            try:
+                business_elements = self.driver.find_elements(By.CSS_SELECTOR, 'a[href*="/maps/place/"]')
+                if business_elements:
+                    logger.info(f"Found {len(business_elements)} businesses using place links")
+            except:
+                pass
+            
+            # Fallback to Nv2PK class
+            if not business_elements:
+                try:
+                    business_elements = self.driver.find_elements(By.CSS_SELECTOR, 'div[class*="Nv2PK"]')
+                    if business_elements:
+                        logger.info(f"Found {len(business_elements)} businesses using Nv2PK class")
+                except:
+                    pass
             
             if not business_elements:
                 logger.warning("No business elements found")
                 return []
             
+            # Scroll to load more results (but not too much)
+            try:
+                results_container = self.driver.find_element(By.CSS_SELECTOR, 'div[role="feed"]')
+                self.human_scroll(results_container)
+            except:
+                pass
+            
+            # Re-find elements after scroll
+            try:
+                business_elements = self.driver.find_elements(By.CSS_SELECTOR, 'a[href*="/maps/place/"]')
+            except:
+                pass
+            
+            # Limit results to max_results_per_location
+            business_elements = business_elements[:self.max_results_per_location]
+            logger.info(f"Processing {len(business_elements)} businesses (max: {self.max_results_per_location})")
+            
             businesses = []
             for i, element in enumerate(business_elements):
-                try:
-                    # Re-find elements to avoid stale references
-                    current_elements = self.driver.find_elements(By.CSS_SELECTOR, business_selectors[0])
-                    if not current_elements:
-                        current_elements = business_elements
+                if i >= self.max_results_per_location:
+                    break
                     
-                    if i < len(current_elements):
-                        business_data = self.extract_business_info(current_elements[i], location)
-                        if business_data:
-                            businesses.append(business_data)
-                            logger.info(f"Extracted business: {business_data.get('name', 'Unknown')}")
+                try:
+                    # Random delay between businesses
+                    self.random_delay(1, 3)
+                    
+                    # Random mouse movement
+                    if random.random() > 0.7:
+                        self.random_mouse_movement()
+                    
+                    business_data = self.extract_business_info(element, location)
+                    if business_data:
+                        businesses.append(business_data)
+                        logger.info(f"Extracted business {i+1}/{len(business_elements)}: {business_data.get('name', 'Unknown')}")
                 except Exception as e:
                     logger.debug(f"Error extracting business {i}: {e}")
                     continue
@@ -154,94 +223,106 @@ class GMBScraper:
     
     def extract_business_info(self, element, location):
         try:
-            # Re-find element to avoid stale reference
+            # Try to click with random delay
             try:
+                self.random_delay(0.5, 1.5)
                 element.click()
             except:
-                # If element is stale, try to find it again
-                time.sleep(1)
+                # If element is stale or can't click, skip
                 return None
             
-            time.sleep(2)
+            # Wait for information to load
+            self.random_delay(2, 3)
             
             business_info = {
                 'location': location,
                 'timestamp': datetime.now().isoformat()
             }
             
+            # Extract name - try multiple selectors
             try:
                 name_element = self.driver.find_element(By.CSS_SELECTOR, 'h1[class*="fontHeadlineLarge"]')
                 business_info['name'] = name_element.text
             except:
-                business_info['name'] = 'N/A'
+                try:
+                    name_element = self.driver.find_element(By.CSS_SELECTOR, 'h1')
+                    business_info['name'] = name_element.text
+                except:
+                    business_info['name'] = 'N/A'
             
+            # Extract rating
             try:
-                rating_element = self.driver.find_element(By.CSS_SELECTOR, 'div[jsaction*="pane.rating.starColor"] span[aria-hidden="true"]')
-                business_info['rating'] = float(rating_element.text.replace(',', '.'))
+                rating_element = self.driver.find_element(By.CSS_SELECTOR, 'span[role="img"][aria-label*="stars"]')
+                rating_text = rating_element.get_attribute('aria-label')
+                rating_match = re.search(r'([\d.]+)\s*stars?', rating_text)
+                if rating_match:
+                    business_info['rating'] = float(rating_match.group(1))
+                else:
+                    business_info['rating'] = 0.0
             except:
                 business_info['rating'] = 0.0
             
+            # Extract review count
             try:
-                reviews_element = self.driver.find_element(By.CSS_SELECTOR, 'button[jsaction*="pane.rating.moreReviews"] span')
+                reviews_element = self.driver.find_element(By.CSS_SELECTOR, 'button[jsaction*="reviews"] span')
                 reviews_text = reviews_element.text
-                reviews_match = re.search(r'\((\d+\.?\d*[KkMm]?)\)', reviews_text)
+                reviews_match = re.search(r'\(?([\d,]+)\)?', reviews_text)
                 if reviews_match:
-                    reviews_str = reviews_match.group(1)
-                    if 'K' in reviews_str.upper():
-                        business_info['review_count'] = int(float(reviews_str.replace('K', '').replace('k', '')) * 1000)
-                    elif 'M' in reviews_str.upper():
-                        business_info['review_count'] = int(float(reviews_str.replace('M', '').replace('m', '')) * 1000000)
-                    else:
-                        business_info['review_count'] = int(reviews_str)
+                    business_info['review_count'] = int(reviews_match.group(1).replace(',', ''))
                 else:
                     business_info['review_count'] = 0
             except:
                 business_info['review_count'] = 0
             
+            # Extract address
             try:
                 address_button = self.driver.find_element(By.CSS_SELECTOR, 'button[data-item-id="address"]')
-                business_info['address'] = address_button.get_attribute('aria-label').replace('Dirección: ', '')
+                business_info['address'] = address_button.get_attribute('aria-label').replace('Address: ', '').replace('Dirección: ', '')
             except:
                 business_info['address'] = 'N/A'
             
+            # Extract phone
             try:
                 phone_button = self.driver.find_element(By.CSS_SELECTOR, 'button[data-item-id*="phone"]')
-                business_info['phone'] = phone_button.get_attribute('aria-label').replace('Teléfono: ', '')
+                phone_text = phone_button.get_attribute('aria-label')
+                business_info['phone'] = phone_text.replace('Phone: ', '').replace('Teléfono: ', '')
             except:
                 business_info['phone'] = 'N/A'
             
+            # Extract website
             try:
                 website_button = self.driver.find_element(By.CSS_SELECTOR, 'a[data-item-id="authority"]')
                 business_info['website'] = website_button.get_attribute('href')
             except:
                 business_info['website'] = 'N/A'
             
+            # Extract category
             try:
-                category_element = self.driver.find_element(By.CSS_SELECTOR, 'button[jsaction*="pane.rating.category"]')
-                business_info['category'] = category_element.text
+                category_button = self.driver.find_element(By.CSS_SELECTOR, 'button[jsaction*="category"]')
+                business_info['category'] = category_button.text
             except:
                 business_info['category'] = 'N/A'
             
+            # Extract hours
             try:
-                hours_button = self.driver.find_element(By.CSS_SELECTOR, 'button[data-item-id*="hours"]')
-                business_info['hours'] = hours_button.get_attribute('aria-label')
+                hours_element = self.driver.find_element(By.CSS_SELECTOR, 'div[aria-label*="hours"]')
+                business_info['hours'] = hours_element.text
             except:
                 business_info['hours'] = 'N/A'
             
-            # Extraer emails
+            # Extract emails
             emails = self.extract_emails_from_gmb()
             
-            # Si hay website, intentar extraer emails del sitio web también
-            if business_info['website'] != 'N/A':
+            # If website exists, try to extract emails from it (with random delay)
+            if business_info['website'] != 'N/A' and random.random() > 0.5:  # Only 50% of the time to avoid detection
+                self.random_delay(1, 2)
                 website_emails = self.extract_emails_from_website(business_info['website'])
                 emails.extend(website_emails)
             
-            # Eliminar duplicados y validar emails
+            # Remove duplicates and validate emails
             emails = list(set([email for email in emails if self.validate_email(email)]))
             business_info['emails'] = emails if emails else []
             business_info['email'] = emails[0] if emails else 'N/A'
-            
-            business_info['age_days'] = self.estimate_business_age()
             
             return business_info
             
@@ -250,40 +331,26 @@ class GMBScraper:
             return None
     
     def validate_email(self, email):
-        """Valida si un string es un email válido"""
+        """Validate email format"""
         email_pattern = r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$'
         return re.match(email_pattern, email.lower()) is not None
     
     def extract_emails_from_gmb(self):
-        """Extrae emails desde la página de GMB"""
+        """Extract emails from GMB page"""
         emails = []
         try:
-            # Buscar en toda la información visible de GMB
             page_text = self.driver.find_element(By.TAG_NAME, 'body').text
-            
-            # Buscar patrones de email en el texto
             email_pattern = r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b'
             found_emails = re.findall(email_pattern, page_text)
             emails.extend(found_emails)
             
-            # Buscar en elementos específicos que podrían contener emails
+            # Look for mailto links
             try:
-                # Buscar en la sección de información
-                info_elements = self.driver.find_elements(By.CSS_SELECTOR, 'div[class*="rogA2c"] a[href^="mailto:"]')
-                for elem in info_elements:
-                    email = elem.get_attribute('href').replace('mailto:', '')
+                mailto_links = self.driver.find_elements(By.CSS_SELECTOR, 'a[href^="mailto:"]')
+                for link in mailto_links:
+                    email = link.get_attribute('href').replace('mailto:', '')
                     if email:
                         emails.append(email)
-            except:
-                pass
-            
-            # Buscar en descripciones y otros textos
-            try:
-                description_elements = self.driver.find_elements(By.CSS_SELECTOR, 'div[class*="WeS02d"]')
-                for elem in description_elements:
-                    text = elem.text
-                    found_emails = re.findall(email_pattern, text)
-                    emails.extend(found_emails)
             except:
                 pass
                 
@@ -292,75 +359,40 @@ class GMBScraper:
         
         return emails
     
-    def extract_emails_from_website(self, url, timeout=10):
-        """Extrae emails desde el sitio web del negocio"""
+    def extract_emails_from_website(self, url, timeout=5):
+        """Extract emails from website"""
         emails = []
         
         if not url or url == 'N/A':
             return emails
             
         try:
-            # Hacer request al sitio web
             headers = {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+                'User-Agent': random.choice(self.user_agents)
             }
             response = requests.get(url, headers=headers, timeout=timeout, verify=False)
             
             if response.status_code == 200:
                 soup = BeautifulSoup(response.text, 'html.parser')
-                
-                # Buscar emails en el HTML
                 email_pattern = r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b'
                 
-                # Buscar en todo el texto
                 page_text = soup.get_text()
                 found_emails = re.findall(email_pattern, page_text)
                 emails.extend(found_emails)
                 
-                # Buscar en enlaces mailto
+                # Look for mailto links
                 mailto_links = soup.find_all('a', href=re.compile(r'^mailto:'))
                 for link in mailto_links:
                     email = link.get('href').replace('mailto:', '').split('?')[0]
                     if email:
                         emails.append(email)
                 
-                # Buscar en meta tags
-                meta_tags = soup.find_all('meta')
-                for tag in meta_tags:
-                    content = tag.get('content', '')
-                    found_emails = re.findall(email_pattern, content)
-                    emails.extend(found_emails)
-                
-                # Buscar páginas de contacto
-                contact_links = []
-                for link in soup.find_all('a', href=True):
-                    href = link['href'].lower()
-                    if any(word in href for word in ['contact', 'contacto', 'contactenos', 'contact-us']):
-                        contact_links.append(link['href'])
-                
-                # Visitar primera página de contacto encontrada
-                if contact_links and len(emails) == 0:
-                    contact_url = contact_links[0]
-                    if not contact_url.startswith('http'):
-                        from urllib.parse import urljoin
-                        contact_url = urljoin(url, contact_url)
-                    
-                    try:
-                        contact_response = requests.get(contact_url, headers=headers, timeout=5, verify=False)
-                        if contact_response.status_code == 200:
-                            contact_soup = BeautifulSoup(contact_response.text, 'html.parser')
-                            contact_text = contact_soup.get_text()
-                            found_emails = re.findall(email_pattern, contact_text)
-                            emails.extend(found_emails)
-                    except:
-                        pass
-                
         except Exception as e:
             logger.debug(f"Error extracting emails from website {url}: {e}")
         
-        # Filtrar emails genéricos y no válidos
+        # Filter generic emails
         filtered_emails = []
-        generic_domains = ['example.com', 'email.com', 'test.com', 'domain.com', 'yoursite.com', 'website.com']
+        generic_domains = ['example.com', 'email.com', 'test.com', 'domain.com']
         
         for email in emails:
             email_lower = email.lower()
@@ -370,62 +402,20 @@ class GMBScraper:
         
         return filtered_emails
     
-    def estimate_business_age(self):
-        try:
-            reviews_button = self.driver.find_element(By.CSS_SELECTOR, 'button[jsaction*="pane.rating.moreReviews"]')
-            reviews_button.click()
-            time.sleep(2)
-            
-            review_dates = self.driver.find_elements(By.CSS_SELECTOR, 'span[class*="rsqaWe"]')
-            
-            oldest_date = datetime.now()
-            for date_element in review_dates[:20]:
-                try:
-                    date_text = date_element.text
-                    if 'hace' in date_text:
-                        if 'año' in date_text:
-                            years = int(re.search(r'(\d+)', date_text).group(1))
-                            review_date = datetime.now() - timedelta(days=years*365)
-                        elif 'mes' in date_text:
-                            months = int(re.search(r'(\d+)', date_text).group(1))
-                            review_date = datetime.now() - timedelta(days=months*30)
-                        elif 'semana' in date_text:
-                            weeks = int(re.search(r'(\d+)', date_text).group(1))
-                            review_date = datetime.now() - timedelta(weeks=weeks)
-                        elif 'día' in date_text:
-                            days = int(re.search(r'(\d+)', date_text).group(1))
-                            review_date = datetime.now() - timedelta(days=days)
-                        else:
-                            continue
-                        
-                        if review_date < oldest_date:
-                            oldest_date = review_date
-                except:
-                    continue
-            
-            age_days = (datetime.now() - oldest_date).days
-            
-            back_button = self.driver.find_element(By.CSS_SELECTOR, 'button[aria-label*="Atrás"]')
-            back_button.click()
-            time.sleep(1)
-            
-            return age_days
-            
-        except:
-            return 0
-    
     def filter_results(self, businesses, min_rating=0, min_reviews=0, min_age_days=0, max_age_days=36500):
         filtered = []
         for business in businesses:
             if (business.get('rating', 0) >= min_rating and
-                business.get('review_count', 0) >= min_reviews and
-                min_age_days <= business.get('age_days', 0) <= max_age_days):
+                business.get('review_count', 0) >= min_reviews):
                 filtered.append(business)
         return filtered
     
     def search_location(self, query, department, province, district, **filters):
         location = f"{district}, {province}, {department}"
         logger.info(f"Searching: {query} in {location}")
+        
+        # Add random delay between locations
+        self.random_delay(3, 6)
         
         businesses = self.search_business(query, location)
         filtered_businesses = self.filter_results(businesses, **filters)
@@ -444,7 +434,6 @@ class GMBScraper:
                 df = pd.DataFrame(self.results)
                 df.to_csv(f'{filename}.csv', index=False, encoding='utf-8-sig')
             else:
-                # Fallback to csv module if pandas is not available
                 if self.results:
                     keys = self.results[0].keys()
                     with open(f'{filename}.csv', 'w', newline='', encoding='utf-8-sig') as f:
