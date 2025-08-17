@@ -8,7 +8,12 @@ import json
 import re
 from datetime import datetime, timedelta
 from dateutil import parser
-import pandas as pd
+try:
+    import pandas as pd
+    PANDAS_AVAILABLE = True
+except ImportError:
+    PANDAS_AVAILABLE = False
+    import csv
 from tqdm import tqdm
 import logging
 import requests
@@ -365,8 +370,17 @@ class GMBScraper:
     
     def save_results(self, filename='gmb_results', format='both'):
         if format in ['csv', 'both']:
-            df = pd.DataFrame(self.results)
-            df.to_csv(f'{filename}.csv', index=False, encoding='utf-8-sig')
+            if PANDAS_AVAILABLE:
+                df = pd.DataFrame(self.results)
+                df.to_csv(f'{filename}.csv', index=False, encoding='utf-8-sig')
+            else:
+                # Fallback to csv module if pandas is not available
+                if self.results:
+                    keys = self.results[0].keys()
+                    with open(f'{filename}.csv', 'w', newline='', encoding='utf-8-sig') as f:
+                        writer = csv.DictWriter(f, fieldnames=keys)
+                        writer.writeheader()
+                        writer.writerows(self.results)
             logger.info(f"Results saved to {filename}.csv")
             
         if format in ['json', 'both']:

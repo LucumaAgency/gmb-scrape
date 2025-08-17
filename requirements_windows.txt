@@ -1,0 +1,15 @@
+# Requirements for Windows with Python 3.13
+# Use: pip install -r requirements_windows.txt
+
+selenium>=4.15.0
+webdriver-manager>=4.0.0
+python-dateutil>=2.8.0
+tqdm>=4.66.0
+beautifulsoup4>=4.12.0
+requests>=2.31.0
+undetected-chromedriver>=3.5.0
+openpyxl>=3.1.0
+lxml>=4.9.0
+
+# For data handling without pandas (Python 3.13 compatibility)
+csv23>=0.3.4
