@@ -257,35 +257,63 @@ class GMBScraper:
                     except:
                         business_info['name'] = 'N/A'
             
-            # Extract rating - check if there are reviews first
+            # Extract rating
+            business_info['rating'] = 0.0  # Default
             try:
-                # Check for "No reviews" text
-                no_reviews = self.driver.find_elements(By.XPATH, "//*[contains(text(), 'No reviews')]")
-                if no_reviews:
-                    business_info['rating'] = 0.0
-                else:
-                    # Try to find rating
-                    rating_element = self.driver.find_element(By.CSS_SELECTOR, 'span[role="img"][aria-label*="star"]')
-                    rating_text = rating_element.get_attribute('aria-label')
-                    rating_match = re.search(r'([\d.]+)\s*star', rating_text)
-                    if rating_match:
-                        business_info['rating'] = float(rating_match.group(1))
-                    else:
-                        business_info['rating'] = 0.0
-            except:
-                business_info['rating'] = 0.0
+                # Try multiple methods to find rating
+                # Method 1: Look for span with stars aria-label
+                rating_spans = self.driver.find_elements(By.CSS_SELECTOR, 'span[aria-label*="star"]')
+                for span in rating_spans:
+                    aria_label = span.get_attribute('aria-label')
+                    if aria_label:
+                        rating_match = re.search(r'([\d.]+)\s*star', aria_label.lower())
+                        if rating_match:
+                            business_info['rating'] = float(rating_match.group(1))
+                            break
+                
+                # Method 2: Look for the rating number directly
+                if business_info['rating'] == 0.0:
+                    rating_texts = self.driver.find_elements(By.CSS_SELECTOR, 'span.MW4etd')
+                    for text_elem in rating_texts:
+                        try:
+                            rating = float(text_elem.text.replace(',', '.'))
+                            if 0 < rating <= 5:
+                                business_info['rating'] = rating
+                                break
+                        except:
+                            continue
+                            
+            except Exception as e:
+                logger.debug(f"Could not extract rating: {e}")
             
             # Extract review count
+            business_info['review_count'] = 0  # Default
             try:
-                reviews_element = self.driver.find_element(By.CSS_SELECTOR, 'button[jsaction*="reviews"] span')
-                reviews_text = reviews_element.text
-                reviews_match = re.search(r'\(?([\d,]+)\)?', reviews_text)
-                if reviews_match:
-                    business_info['review_count'] = int(reviews_match.group(1).replace(',', ''))
-                else:
-                    business_info['review_count'] = 0
-            except:
-                business_info['review_count'] = 0
+                # Method 1: Look for review count in parentheses
+                review_elements = self.driver.find_elements(By.CSS_SELECTOR, 'span.UY7F9')
+                for elem in review_elements:
+                    text = elem.text
+                    # Remove parentheses and extract number
+                    text = text.replace('(', '').replace(')', '')
+                    if text.isdigit():
+                        business_info['review_count'] = int(text)
+                        break
+                    elif ',' in text:
+                        business_info['review_count'] = int(text.replace(',', ''))
+                        break
+                
+                # Method 2: Look for button with reviews
+                if business_info['review_count'] == 0:
+                    reviews_buttons = self.driver.find_elements(By.CSS_SELECTOR, 'button[jsaction*="review"]')
+                    for button in reviews_buttons:
+                        text = button.text
+                        numbers = re.findall(r'\d+', text.replace(',', ''))
+                        if numbers:
+                            business_info['review_count'] = int(numbers[0])
+                            break
+                            
+            except Exception as e:
+                logger.debug(f"Could not extract review count: {e}")
             
             # Extract address
             try:
@@ -418,9 +446,19 @@ class GMBScraper:
     def filter_results(self, businesses, min_rating=0, min_reviews=0, min_age_days=0, max_age_days=36500):
         filtered = []
         for business in businesses:
-            if (business.get('rating', 0) >= min_rating and
-                business.get('review_count', 0) >= min_reviews):
+            rating = business.get('rating', 0)
+            reviews = business.get('review_count', 0)
+            
+            # Log what we're filtering
+            logger.debug(f"Filtering {business.get('name', 'Unknown')}: rating={rating} (min={min_rating}), reviews={reviews} (min={min_reviews})")
+            
+            if (rating >= min_rating and reviews >= min_reviews):
                 filtered.append(business)
+                logger.info(f"✓ Accepted: {business.get('name', 'Unknown')} (rating: {rating}, reviews: {reviews})")
+            else:
+                logger.info(f"✗ Filtered out: {business.get('name', 'Unknown')} (rating: {rating} < {min_rating} or reviews: {reviews} < {min_reviews})")
+        
+        logger.info(f"Filter results: {len(filtered)} of {len(businesses)} businesses passed filters")
         return filtered
     
     def search_location(self, query, department, province, district, **filters):
