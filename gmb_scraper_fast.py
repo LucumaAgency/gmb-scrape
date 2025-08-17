@@ -20,16 +20,18 @@ from datetime import datetime
 from tqdm import tqdm
 import logging
 import argparse
+import os
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
 class GMBFastScraper:
-    def __init__(self, headless=False, max_results=30):
+    def __init__(self, headless=False, max_results=30, skip_first=0):
         self.driver = None
         self.headless = headless
         self.results = []
         self.max_results_per_location = max_results  # Aumentado a 30 por defecto
+        self.skip_first = skip_first  # Número de resultados a saltar
         self.user_agents = [
             'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
             'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36',
@@ -118,13 +120,37 @@ class GMBFastScraper:
                 except:
                     pass
             
-            # Limitar resultados
+            # Aplicar skip y limitar resultados
+            total_to_extract = self.skip_first + self.max_results_per_location
+            
+            # Si necesitamos más elementos para el skip, hacer scroll adicional
+            if len(business_elements) < total_to_extract:
+                try:
+                    results_container = self.driver.find_element(By.CSS_SELECTOR, 'div[role="feed"]')
+                    # Scrolls adicionales para cargar más resultados
+                    for _ in range(3):  # Hasta 3 scrolls adicionales
+                        self.driver.execute_script("arguments[0].scrollTop = arguments[0].scrollHeight", results_container)
+                        self.quick_delay(1, 1.5)
+                        # Re-buscar elementos
+                        business_elements = self.driver.find_elements(By.CSS_SELECTOR, 'a[href*="/maps/place/"]')
+                        if len(business_elements) >= total_to_extract:
+                            break
+                except:
+                    pass
+            
+            # Aplicar skip: saltar los primeros N elementos
+            if self.skip_first > 0:
+                logger.info(f"Skipping first {self.skip_first} results as requested")
+                business_elements = business_elements[self.skip_first:]
+            
+            # Limitar a max_results
             business_elements = business_elements[:self.max_results_per_location]
             
             businesses = []
             for i, element in enumerate(business_elements):
                 try:
-                    logger.info(f"Extracting {i+1}/{len(business_elements)}")
+                    actual_index = i + self.skip_first + 1  # Índice real considerando skip
+                    logger.info(f"Extracting #{actual_index} (item {i+1}/{len(business_elements)} in this batch)")
                     
                     # Re-encontrar elementos (DOM cambia)
                     current_elements = self.driver.find_elements(By.CSS_SELECTOR, 'a[href*="/maps/place/"]')
@@ -337,7 +363,7 @@ class GMBFastScraper:
                 pass
             return None
     
-    def save_results(self, format='csv'):
+    def save_results(self, format='csv', append=False):
         """Guardar resultados en archivo"""
         if not self.results:
             logger.warning("No results to save")
@@ -346,10 +372,19 @@ class GMBFastScraper:
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         
         if format == 'csv' or format == 'both':
-            filename = f"gmb_fast_{timestamp}.csv"
-            with open(filename, 'w', newline='', encoding='utf-8') as f:
+            # Si append=True, buscar el archivo más reciente o usar nombre fijo
+            if append:
+                filename = "gmb_fast_continuous.csv"
+                file_exists = os.path.exists(filename)
+            else:
+                filename = f"gmb_fast_{timestamp}.csv"
+            # Modo append o write
+            mode = 'a' if append and file_exists else 'w'
+            with open(filename, mode, newline='', encoding='utf-8') as f:
                 writer = csv.DictWriter(f, fieldnames=['name', 'phone', 'website', 'location', 'search_query', 'timestamp'])
-                writer.writeheader()
+                # Solo escribir header si es un archivo nuevo
+                if mode == 'w' or not file_exists:
+                    writer.writeheader()
                 writer.writerows(self.results)
             logger.info(f"Results saved to {filename}")
         
@@ -367,7 +402,7 @@ class GMBFastScraper:
         print(f"Businesses with phone: {sum(1 for r in self.results if r['phone'] != 'N/A')}")
         print(f"Businesses with website: {sum(1 for r in self.results if r['website'] != 'N/A')}")
     
-    def run(self, query, locations, format='csv'):
+    def run(self, query, locations, format='csv', append=False):
         """Ejecutar scraping completo"""
         self.init_driver()
         
@@ -381,7 +416,7 @@ class GMBFastScraper:
                 if location != locations[-1]:
                     self.quick_delay(2, 3)
             
-            self.save_results(format)
+            self.save_results(format, append)
             
         finally:
             if self.driver:
@@ -393,8 +428,10 @@ def main():
     parser.add_argument('query', help='Search query (e.g., "restaurants", "hotels")')
     parser.add_argument('--locations', nargs='+', default=['Lima'], help='Locations to search')
     parser.add_argument('--max-results', type=int, default=30, help='Max results per location (default: 30)')
+    parser.add_argument('--skip', type=int, default=0, help='Skip first N results (useful for pagination)')
     parser.add_argument('--format', choices=['csv', 'json', 'both'], default='csv', help='Output format')
     parser.add_argument('--headless', action='store_true', help='Run in headless mode')
+    parser.add_argument('--append', action='store_true', help='Append to existing file instead of creating new one')
     
     args = parser.parse_args()
     
@@ -407,13 +444,20 @@ def main():
     
     scraper = GMBFastScraper(
         headless=args.headless,
-        max_results=args.max_results
+        max_results=args.max_results,
+        skip_first=args.skip
     )
+    
+    # Mostrar configuración de skip si se usa
+    if args.skip > 0:
+        print(f"\n⚠️  Skipping first {args.skip} results")
+        print(f"🎯  Will extract results {args.skip + 1} to {args.skip + args.max_results}")
     
     scraper.run(
         query=args.query,
         locations=args.locations,
-        format=args.format
+        format=args.format,
+        append=args.append
     )
 
 if __name__ == "__main__":
