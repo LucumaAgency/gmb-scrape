@@ -195,10 +195,7 @@ class GMBScraper:
             logger.info(f"Processing {len(business_elements)} businesses (max: {self.max_results_per_location})")
             
             businesses = []
-            for i, element in enumerate(business_elements):
-                if i >= self.max_results_per_location:
-                    break
-                    
+            for i in range(min(len(business_elements), self.max_results_per_location)):
                 try:
                     # Random delay between businesses
                     self.random_delay(1, 3)
@@ -207,10 +204,27 @@ class GMBScraper:
                     if random.random() > 0.7:
                         self.random_mouse_movement()
                     
-                    business_data = self.extract_business_info(element, location)
+                    # Re-find elements each time because DOM changes after clicks
+                    current_elements = self.driver.find_elements(By.CSS_SELECTOR, 'a[href*="/maps/place/"]')
+                    if i >= len(current_elements):
+                        logger.warning(f"Element {i} no longer exists, skipping")
+                        continue
+                    
+                    # Extract the business name from the element before clicking
+                    try:
+                        # Try to get the business name from the list item
+                        parent_div = current_elements[i].find_element(By.XPATH, './ancestor::div[@class="Nv2PK THOPZb"]')
+                        name_elem = parent_div.find_element(By.CSS_SELECTOR, 'div.qBF1Pd')
+                        preview_name = name_elem.text if name_elem else f"Business {i+1}"
+                    except:
+                        preview_name = f"Business {i+1}"
+                    
+                    logger.info(f"Processing {i+1}/{self.max_results_per_location}: {preview_name}")
+                    
+                    business_data = self.extract_business_info(current_elements[i], location)
                     if business_data:
                         businesses.append(business_data)
-                        logger.info(f"Extracted business {i+1}/{len(business_elements)}: {business_data.get('name', 'Unknown')}")
+                        logger.info(f"Extracted business {i+1}: {business_data.get('name', 'Unknown')}")
                 except Exception as e:
                     logger.debug(f"Error extracting business {i}: {e}")
                     continue
@@ -233,6 +247,14 @@ class GMBScraper:
             
             # Wait for information to load
             self.random_delay(2, 3)
+            
+            # Check if we actually opened a business detail (not still in list view)
+            try:
+                # Look for the back button or business title that appears in detail view
+                self.driver.find_element(By.CSS_SELECTOR, 'button[aria-label*="Back"]')
+            except:
+                logger.debug("Detail view not opened properly")
+                return None
             
             business_info = {
                 'location': location,
@@ -364,6 +386,19 @@ class GMBScraper:
             emails = list(set([email for email in emails if self.validate_email(email)]))
             business_info['emails'] = emails if emails else []
             business_info['email'] = emails[0] if emails else 'N/A'
+            
+            # Go back to the list
+            try:
+                back_button = self.driver.find_element(By.CSS_SELECTOR, 'button[aria-label*="Back"]')
+                back_button.click()
+                self.random_delay(1, 2)
+            except:
+                # Try alternative back navigation
+                try:
+                    self.driver.execute_script("window.history.back()")
+                    self.random_delay(1, 2)
+                except:
+                    logger.debug("Could not go back to list")
             
             return business_info
             
