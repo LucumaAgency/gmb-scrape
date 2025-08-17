@@ -327,17 +327,36 @@ class GMBFastScraper:
                 except:
                     pass
             
-            # 3. EXTRAER WEBSITE (búsqueda rápida)
+            # 3. EXTRAER WEBSITE - Usando el selector correcto del scraper original
             try:
-                # Buscar links con data-tooltip de website
-                website_links = self.driver.find_elements(By.CSS_SELECTOR, 'a[data-tooltip*="website"], a[data-tooltip*="Website"], a[data-tooltip*="sitio"], a[data-tooltip*="Sitio"]')
-                for link in website_links:
-                    href = link.get_attribute('href')
-                    if href and not href.startswith('https://www.google.com'):
-                        business_info['website'] = href
-                        break
+                # Método 1: Selector específico que funciona en gmb_scraper_lite.py
+                website_button = self.driver.find_element(By.CSS_SELECTOR, 'a[data-item-id="authority"]')
+                href = website_button.get_attribute('href')
+                if href and not href.startswith('https://www.google.com'):
+                    business_info['website'] = href
             except:
-                pass
+                try:
+                    # Método 2: Buscar links con data-tooltip de website
+                    website_links = self.driver.find_elements(By.CSS_SELECTOR, 'a[data-tooltip*="website"], a[data-tooltip*="Website"], a[data-tooltip*="sitio"], a[data-tooltip*="Sitio"], a[data-tooltip*="Abrir sitio web"], a[data-tooltip*="Open website"]')
+                    for link in website_links:
+                        href = link.get_attribute('href')
+                        if href and not href.startswith('https://www.google.com'):
+                            business_info['website'] = href
+                            break
+                except:
+                    pass
+            
+            # Método 3: Buscar por aria-label
+            if business_info['website'] == 'N/A':
+                try:
+                    website_links = self.driver.find_elements(By.CSS_SELECTOR, 'a[aria-label*="Website"], a[aria-label*="Sitio web"], a[aria-label*="sitio web"]')
+                    for link in website_links:
+                        href = link.get_attribute('href')
+                        if href and not href.startswith('https://www.google.com') and 'maps' not in href:
+                            business_info['website'] = href
+                            break
+                except:
+                    pass
             
             # Volver a la lista (sin verificar, más rápido)
             try:
