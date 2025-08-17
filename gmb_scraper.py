@@ -74,13 +74,16 @@ class GMBScraper:
             business_elements = self.driver.find_elements(By.CSS_SELECTOR, 'div[role="feed"] > div > div[jsaction]')
             
             businesses = []
-            for element in business_elements:
+            for i, element in enumerate(business_elements):
                 try:
-                    business_data = self.extract_business_info(element, location)
-                    if business_data:
-                        businesses.append(business_data)
+                    # Re-find elements to avoid stale references
+                    current_elements = self.driver.find_elements(By.CSS_SELECTOR, 'div[role="feed"] > div > div[jsaction]')
+                    if i < len(current_elements):
+                        business_data = self.extract_business_info(current_elements[i], location)
+                        if business_data:
+                            businesses.append(business_data)
                 except Exception as e:
-                    logger.error(f"Error extracting business: {e}")
+                    logger.debug(f"Error extracting business {i}: {e}")
                     continue
                     
             return businesses
@@ -91,7 +94,14 @@ class GMBScraper:
     
     def extract_business_info(self, element, location):
         try:
-            element.click()
+            # Re-find element to avoid stale reference
+            try:
+                element.click()
+            except:
+                # If element is stale, try to find it again
+                time.sleep(1)
+                return None
+            
             time.sleep(2)
             
             business_info = {
