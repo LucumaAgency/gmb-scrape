@@ -13,6 +13,8 @@ import re
 import random
 from datetime import datetime, timedelta
 from dateutil import parser
+from collections import defaultdict
+import os
 try:
     import pandas as pd
     PANDAS_AVAILABLE = True
@@ -623,6 +625,7 @@ class GMBScraper:
             business['department'] = department
             business['province'] = province
             business['district'] = district
+            business['search_keyword'] = query  # Agregar keyword de búsqueda
             
         self.results.extend(filtered_businesses)
         return filtered_businesses
@@ -645,6 +648,75 @@ class GMBScraper:
             with open(f'{filename}.json', 'w', encoding='utf-8') as f:
                 json.dump(self.results, f, ensure_ascii=False, indent=2)
             logger.info(f"Results saved to {filename}.json")
+    
+    def save_results_by_district(self, format='csv'):
+        """Guarda resultados en archivos separados por distrito"""
+        if not self.results:
+            logger.warning("No results to save")
+            return
+        
+        # Agrupar resultados por distrito
+        from collections import defaultdict
+        import os
+        
+        by_district = defaultdict(list)
+        for result in self.results:
+            district_key = result.get('district', 'unknown').replace(' ', '_')
+            by_district[district_key].append(result)
+        
+        # Crear directorio para resultados si no existe
+        os.makedirs('gmb_results', exist_ok=True)
+        
+        # Guardar cada distrito en su archivo
+        for district, businesses in by_district.items():
+            # Ordenar por keyword para agrupar
+            businesses.sort(key=lambda x: x.get('search_keyword', ''))
+            
+            filename = f"gmb_results/gmb_{district}.csv"
+            
+            # Verificar si el archivo existe para append
+            file_exists = os.path.exists(filename)
+            
+            if format in ['csv', 'both']:
+                if PANDAS_AVAILABLE:
+                    df = pd.DataFrame(businesses)
+                    # Si existe, leer el existente y combinar
+                    if file_exists:
+                        existing_df = pd.read_csv(filename, encoding='utf-8-sig')
+                        df = pd.concat([existing_df, df], ignore_index=True)
+                        # Eliminar duplicados basados en nombre y dirección
+                        df = df.drop_duplicates(subset=['name', 'address'], keep='last')
+                    # Ordenar por keyword y luego por nombre
+                    df = df.sort_values(['search_keyword', 'name'])
+                    df.to_csv(filename, index=False, encoding='utf-8-sig')
+                else:
+                    # Sin pandas, append manual
+                    mode = 'a' if file_exists else 'w'
+                    with open(filename, mode, newline='', encoding='utf-8-sig') as f:
+                        keys = businesses[0].keys()
+                        writer = csv.DictWriter(f, fieldnames=keys)
+                        if not file_exists:
+                            writer.writeheader()
+                        writer.writerows(businesses)
+                
+                logger.info(f"Results saved to {filename} ({len(businesses)} businesses)")
+        
+        # Crear resumen
+        summary_file = 'gmb_results/summary.txt'
+        with open(summary_file, 'w', encoding='utf-8') as f:
+            f.write(f"GMB Scraping Summary\n")
+            f.write(f"="*50 + "\n")
+            f.write(f"Total businesses: {len(self.results)}\n")
+            f.write(f"Districts processed: {len(by_district)}\n\n")
+            for district, businesses in sorted(by_district.items()):
+                keywords = defaultdict(int)
+                for b in businesses:
+                    keywords[b.get('search_keyword', 'unknown')] += 1
+                f.write(f"\n{district}:\n")
+                for keyword, count in sorted(keywords.items()):
+                    f.write(f"  - {keyword}: {count} results\n")
+        
+        logger.info(f"Summary saved to {summary_file}")
     
     def close(self):
         if self.driver:

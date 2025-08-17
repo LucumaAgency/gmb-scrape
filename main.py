@@ -238,11 +238,13 @@ def cli_mode():
             total_with_emails += emails_found
             print(f"   ✓ {dist}, {prov}: {len(results)} resultados ({emails_found} con email)")
         
-        scraper.save_results(args.output, args.format)
+        # Usar el nuevo método que guarda por distrito
+        scraper.save_results_by_district(format=args.format)
         print(f"\n✅ Búsqueda completada:")
         print(f"   - Total de negocios: {total_found}")
         print(f"   - Con email: {total_with_emails}")
-        print(f"   - Guardado en: {args.output}")
+        print(f"   - Guardado en: gmb_results/ (un archivo por distrito)")
+        print(f"   - Revisa gmb_results/summary.txt para el resumen")
         
     except Exception as e:
         logger.error(f"Error: {e}")
