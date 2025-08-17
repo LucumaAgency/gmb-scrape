@@ -174,19 +174,52 @@ class GMBFastScraper:
                 'timestamp': datetime.now().isoformat()
             }
             
-            # 1. EXTRAER NOMBRE (más rápido, sin esperar h1)
+            # Verificar que estamos en la página de detalle (no en la lista)
+            detail_opened = False
             try:
-                # Intentar primero con h1
-                h1 = self.driver.find_element(By.CSS_SELECTOR, 'h1')
-                if h1.text:
-                    business_info['name'] = h1.text.strip()
+                # Buscar el botón de volver que indica que estamos en detalle
+                back_selectors = [
+                    'button[aria-label*="Back"]',
+                    'button[aria-label*="back"]', 
+                    'button[aria-label*="Atrás"]',
+                    'button[aria-label*="Volver"]'
+                ]
+                for selector in back_selectors:
+                    try:
+                        self.driver.find_element(By.CSS_SELECTOR, selector)
+                        detail_opened = True
+                        break
+                    except:
+                        continue
             except:
+                pass
+            
+            # Si no se abrió el detalle, devolver None
+            if not detail_opened:
+                logger.debug("Detail page not opened, skipping")
+                return None
+            
+            # 1. EXTRAER NOMBRE - Mejorado para evitar capturar "Resultados"
+            try:
+                # Buscar h1 pero excluir "Resultados"
+                h1_elements = self.driver.find_elements(By.CSS_SELECTOR, 'h1')
+                for h1 in h1_elements:
+                    text = h1.text.strip()
+                    if text and text not in ['Resultados', 'Results', 'Search results', '']:
+                        business_info['name'] = text
+                        break
+            except:
+                pass
+            
+            # Si aún no tenemos nombre, buscar en otras ubicaciones
+            if business_info['name'] == 'N/A':
                 try:
-                    # Fallback: buscar en divs con clase específica
+                    # Buscar en divs con clase específica
                     name_divs = self.driver.find_elements(By.CSS_SELECTOR, 'div[class*="fontHeadlineLarge"]')
                     for div in name_divs:
-                        if div.text and len(div.text) > 2:
-                            business_info['name'] = div.text.strip()
+                        text = div.text.strip()
+                        if text and len(text) > 2 and text not in ['Resultados', 'Results']:
+                            business_info['name'] = text
                             break
                 except:
                     pass
