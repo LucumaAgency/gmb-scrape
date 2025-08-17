@@ -241,24 +241,37 @@ class GMBScraper:
             
             # Extract name - try multiple selectors
             try:
-                name_element = self.driver.find_element(By.CSS_SELECTOR, 'h1[class*="fontHeadlineLarge"]')
+                # First try the main title
+                name_element = self.driver.find_element(By.CSS_SELECTOR, 'h1.DUwDvf')
                 business_info['name'] = name_element.text
             except:
                 try:
-                    name_element = self.driver.find_element(By.CSS_SELECTOR, 'h1')
+                    # Try alternative selector
+                    name_element = self.driver.find_element(By.CSS_SELECTOR, 'h1[class*="fontHeadline"]')
                     business_info['name'] = name_element.text
                 except:
-                    business_info['name'] = 'N/A'
+                    try:
+                        # Try any h1
+                        name_element = self.driver.find_element(By.CSS_SELECTOR, 'h1')
+                        business_info['name'] = name_element.text
+                    except:
+                        business_info['name'] = 'N/A'
             
-            # Extract rating
+            # Extract rating - check if there are reviews first
             try:
-                rating_element = self.driver.find_element(By.CSS_SELECTOR, 'span[role="img"][aria-label*="stars"]')
-                rating_text = rating_element.get_attribute('aria-label')
-                rating_match = re.search(r'([\d.]+)\s*stars?', rating_text)
-                if rating_match:
-                    business_info['rating'] = float(rating_match.group(1))
-                else:
+                # Check for "No reviews" text
+                no_reviews = self.driver.find_elements(By.XPATH, "//*[contains(text(), 'No reviews')]")
+                if no_reviews:
                     business_info['rating'] = 0.0
+                else:
+                    # Try to find rating
+                    rating_element = self.driver.find_element(By.CSS_SELECTOR, 'span[role="img"][aria-label*="star"]')
+                    rating_text = rating_element.get_attribute('aria-label')
+                    rating_match = re.search(r'([\d.]+)\s*star', rating_text)
+                    if rating_match:
+                        business_info['rating'] = float(rating_match.group(1))
+                    else:
+                        business_info['rating'] = 0.0
             except:
                 business_info['rating'] = 0.0
             
