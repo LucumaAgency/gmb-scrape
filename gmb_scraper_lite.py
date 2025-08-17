@@ -212,10 +212,13 @@ class GMBScraper:
                     
                     # Extract the business name from the element before clicking
                     try:
-                        # Try to get the business name from the list item
-                        parent_div = current_elements[i].find_element(By.XPATH, './ancestor::div[@class="Nv2PK THOPZb"]')
-                        name_elem = parent_div.find_element(By.CSS_SELECTOR, 'div.qBF1Pd')
-                        preview_name = name_elem.text if name_elem else f"Business {i+1}"
+                        # Get the aria-label which usually contains the business name
+                        aria_label = current_elements[i].get_attribute('aria-label')
+                        if aria_label:
+                            # Clean up the aria-label to get just the name
+                            preview_name = aria_label.split('·')[0].strip()
+                        else:
+                            preview_name = f"Business {i+1}"
                     except:
                         preview_name = f"Business {i+1}"
                     
@@ -240,20 +243,78 @@ class GMBScraper:
             # Try to click with random delay
             try:
                 self.random_delay(0.5, 1.5)
+                # Scroll element into view first
+                self.driver.execute_script("arguments[0].scrollIntoView(true);", element)
+                time.sleep(0.5)
                 element.click()
-            except:
-                # If element is stale or can't click, skip
-                return None
+                logger.info("Clicked on business element")
+            except Exception as e:
+                logger.warning(f"Could not click element: {e}")
+                # Try JavaScript click as fallback
+                try:
+                    self.driver.execute_script("arguments[0].click();", element)
+                    logger.info("Clicked using JavaScript")
+                except:
+                    return None
             
             # Wait for information to load
-            self.random_delay(2, 3)
+            self.random_delay(3, 4)
             
             # Check if we actually opened a business detail (not still in list view)
+            detail_opened = False
+            
+            # Method 1: Look for any back button (try multiple languages)
+            back_button = None
             try:
-                # Look for the back button or business title that appears in detail view
-                self.driver.find_element(By.CSS_SELECTOR, 'button[aria-label*="Back"]')
+                back_selectors = [
+                    'button[aria-label*="Back"]',
+                    'button[aria-label*="back"]',
+                    'button[aria-label*="Atrás"]',
+                    'button[aria-label*="Volver"]',
+                    'button[jsaction*="back"]',
+                    'button[class*="back"]'
+                ]
+                for selector in back_selectors:
+                    try:
+                        back_button = self.driver.find_element(By.CSS_SELECTOR, selector)
+                        detail_opened = True
+                        logger.info(f"Found back button with selector: {selector}")
+                        break
+                    except:
+                        continue
             except:
-                logger.debug("Detail view not opened properly")
+                pass
+            
+            # Method 2: Look for business name in h1
+            if not detail_opened:
+                try:
+                    h1_elements = self.driver.find_elements(By.TAG_NAME, 'h1')
+                    for h1 in h1_elements:
+                        if h1.text and h1.text not in ["Resultados", "Results", ""]:
+                            detail_opened = True
+                            logger.info(f"Found h1 with text: {h1.text[:50]}...")
+                            break
+                except:
+                    pass
+            
+            # Method 3: Look for business info elements
+            if not detail_opened:
+                try:
+                    # Check if any business-specific buttons exist
+                    if self.driver.find_elements(By.CSS_SELECTOR, 'button[data-item-id*="phone"], button[data-item-id*="address"]'):
+                        detail_opened = True
+                        logger.info("Found business info buttons")
+                except:
+                    pass
+            
+            if not detail_opened:
+                logger.warning("Detail view not opened - staying in list view")
+                # Take a screenshot for debugging
+                try:
+                    self.driver.save_screenshot(f"debug_no_detail_{int(time.time())}.png")
+                    logger.info("Screenshot saved for debugging")
+                except:
+                    pass
                 return None
             
             business_info = {
@@ -262,22 +323,39 @@ class GMBScraper:
             }
             
             # Extract name - try multiple selectors
-            try:
-                # First try the main title
-                name_element = self.driver.find_element(By.CSS_SELECTOR, 'h1.DUwDvf')
-                business_info['name'] = name_element.text
-            except:
+            name_found = False
+            name_selectors = [
+                'h1.DUwDvf',
+                'h1[class*="fontHeadline"]',
+                'h1[class*="fontTitle"]',
+                'div[class*="fontTitle"] span',
+                'h1'
+            ]
+            
+            for selector in name_selectors:
                 try:
-                    # Try alternative selector
-                    name_element = self.driver.find_element(By.CSS_SELECTOR, 'h1[class*="fontHeadline"]')
-                    business_info['name'] = name_element.text
+                    if selector == 'h1':
+                        # For generic h1, get all and filter
+                        h1_elements = self.driver.find_elements(By.TAG_NAME, 'h1')
+                        for h1 in h1_elements:
+                            if h1.text and h1.text not in ["Resultados", "Results", ""]:
+                                business_info['name'] = h1.text
+                                name_found = True
+                                logger.info(f"Found name with h1: {business_info['name']}")
+                                break
+                    else:
+                        name_element = self.driver.find_element(By.CSS_SELECTOR, selector)
+                        if name_element.text:
+                            business_info['name'] = name_element.text
+                            name_found = True
+                            logger.info(f"Found name with {selector}: {business_info['name']}")
+                            break
                 except:
-                    try:
-                        # Try any h1
-                        name_element = self.driver.find_element(By.CSS_SELECTOR, 'h1')
-                        business_info['name'] = name_element.text
-                    except:
-                        business_info['name'] = 'N/A'
+                    continue
+            
+            if not name_found:
+                business_info['name'] = 'N/A'
+                logger.warning("Could not find business name")
             
             # Extract rating
             business_info['rating'] = 0.0  # Default
@@ -387,20 +465,55 @@ class GMBScraper:
             business_info['emails'] = emails if emails else []
             business_info['email'] = emails[0] if emails else 'N/A'
             
+            # Log what we extracted
+            logger.info(f"Extracted: {business_info.get('name', 'N/A')} - Rating: {business_info.get('rating', 0)} - Reviews: {business_info.get('review_count', 0)}")
+            
             # Go back to the list
-            try:
-                back_button = self.driver.find_element(By.CSS_SELECTOR, 'button[aria-label*="Back"]')
-                back_button.click()
-                self.random_delay(1, 2)
-            except:
-                # Try alternative back navigation
+            back_success = False
+            if back_button:
+                try:
+                    back_button.click()
+                    self.random_delay(1, 2)
+                    back_success = True
+                    logger.info("Clicked back button")
+                except:
+                    pass
+            
+            if not back_success:
+                # Try to find back button again with different selectors
+                back_selectors = [
+                    'button[aria-label*="Back"]',
+                    'button[aria-label*="back"]', 
+                    'button[aria-label*="Atrás"]',
+                    'button[aria-label*="Volver"]',
+                    'button[jsaction*="back"]'
+                ]
+                for selector in back_selectors:
+                    try:
+                        btn = self.driver.find_element(By.CSS_SELECTOR, selector)
+                        btn.click()
+                        self.random_delay(1, 2)
+                        back_success = True
+                        logger.info(f"Clicked back button with selector: {selector}")
+                        break
+                    except:
+                        continue
+            
+            if not back_success:
+                # Try browser back as last resort
                 try:
                     self.driver.execute_script("window.history.back()")
                     self.random_delay(1, 2)
+                    logger.info("Used browser back")
                 except:
-                    logger.debug("Could not go back to list")
+                    logger.warning("Could not go back to list")
             
-            return business_info
+            # Only return if we at least got a name
+            if business_info.get('name', 'N/A') != 'N/A':
+                return business_info
+            else:
+                logger.debug("No valid business data extracted")
+                return None
             
         except Exception as e:
             logger.error(f"Error extracting business info: {e}")
