@@ -56,12 +56,42 @@ class GMBScraper:
             search_query = f"{query} en {location}, Perú"
             url = f"https://www.google.com/maps/search/{search_query.replace(' ', '+')}"
             
+            logger.info(f"Loading URL: {url}")
             self.driver.get(url)
-            time.sleep(3)
+            time.sleep(5)  # Give more time for initial load
             
-            results_container = self.wait.until(
-                EC.presence_of_element_located((By.CSS_SELECTOR, 'div[role="feed"]'))
-            )
+            # Check if we need to accept cookies or dismiss popups
+            try:
+                accept_button = self.driver.find_element(By.XPATH, "//button[contains(text(), 'Accept') or contains(text(), 'Aceptar')]")
+                accept_button.click()
+                time.sleep(2)
+            except:
+                pass
+            
+            # Try multiple selectors for the results container
+            results_container = None
+            selectors = [
+                'div[role="feed"]',
+                'div[role="main"]',
+                'div[class*="m6QErb"][role="feed"]',
+                'div[class*="m6QErb"]'
+            ]
+            
+            for selector in selectors:
+                try:
+                    results_container = self.wait.until(
+                        EC.presence_of_element_located((By.CSS_SELECTOR, selector)),
+                        timeout=5
+                    )
+                    if results_container:
+                        logger.debug(f"Found results container with selector: {selector}")
+                        break
+                except:
+                    continue
+            
+            if not results_container:
+                logger.error("Could not find results container")
+                return []
             
             last_height = 0
             scroll_attempts = 0
@@ -78,17 +108,40 @@ class GMBScraper:
                 last_height = new_height
                 scroll_attempts += 1
             
-            business_elements = self.driver.find_elements(By.CSS_SELECTOR, 'div[role="feed"] > div > div[jsaction]')
+            # Try multiple selectors for business elements
+            business_selectors = [
+                'div[role="feed"] > div > div[jsaction]',
+                'div[role="article"]',
+                'a[href*="/maps/place/"]',
+                'div[class*="Nv2PK"]',
+                'div[class*="bfdHYd"]'
+            ]
+            
+            business_elements = []
+            for selector in business_selectors:
+                elements = self.driver.find_elements(By.CSS_SELECTOR, selector)
+                if elements:
+                    business_elements = elements
+                    logger.info(f"Found {len(elements)} businesses with selector: {selector}")
+                    break
+            
+            if not business_elements:
+                logger.warning("No business elements found")
+                return []
             
             businesses = []
             for i, element in enumerate(business_elements):
                 try:
                     # Re-find elements to avoid stale references
-                    current_elements = self.driver.find_elements(By.CSS_SELECTOR, 'div[role="feed"] > div > div[jsaction]')
+                    current_elements = self.driver.find_elements(By.CSS_SELECTOR, business_selectors[0])
+                    if not current_elements:
+                        current_elements = business_elements
+                    
                     if i < len(current_elements):
                         business_data = self.extract_business_info(current_elements[i], location)
                         if business_data:
                             businesses.append(business_data)
+                            logger.info(f"Extracted business: {business_data.get('name', 'Unknown')}")
                 except Exception as e:
                     logger.debug(f"Error extracting business {i}: {e}")
                     continue
