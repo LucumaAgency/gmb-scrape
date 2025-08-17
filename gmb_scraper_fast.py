@@ -107,18 +107,36 @@ class GMBFastScraper:
             
             logger.info(f"Found {len(business_elements)} businesses")
             
-            # Scroll mínimo para cargar más resultados
-            if len(business_elements) < self.max_results_per_location:
+            # Calcular cuántos elementos necesitamos en total
+            total_needed = self.skip_first + self.max_results_per_location
+            
+            # Scroll para cargar más resultados si necesitamos más elementos
+            if len(business_elements) < total_needed:
+                logger.info(f"Need {total_needed} results (skip {self.skip_first} + extract {self.max_results_per_location})")
+                logger.info(f"Currently have {len(business_elements)}, scrolling for more...")
+                
                 try:
                     results_container = self.driver.find_element(By.CSS_SELECTOR, 'div[role="feed"]')
-                    for _ in range(2):  # Solo 2 scrolls
-                        self.driver.execute_script("arguments[0].scrollTop += 500", results_container)
-                        self.quick_delay(0.8, 1.2)
                     
-                    # Re-buscar elementos
-                    business_elements = self.driver.find_elements(By.CSS_SELECTOR, 'a[href*="/maps/place/"]')
-                except:
-                    pass
+                    # Calcular cuántos scrolls necesitamos (aproximadamente 10-15 resultados por scroll)
+                    results_per_scroll = 12  # Estimado
+                    scrolls_needed = max(3, (total_needed - len(business_elements)) // results_per_scroll + 2)
+                    
+                    for scroll_num in range(min(scrolls_needed, 10)):  # Máximo 10 scrolls para evitar timeout
+                        # Scroll hasta el final
+                        self.driver.execute_script("arguments[0].scrollTop = arguments[0].scrollHeight", results_container)
+                        self.quick_delay(1, 1.5)
+                        
+                        # Re-buscar elementos
+                        business_elements = self.driver.find_elements(By.CSS_SELECTOR, 'a[href*="/maps/place/"]')
+                        logger.info(f"Scroll {scroll_num + 1}: Found {len(business_elements)} results")
+                        
+                        # Si ya tenemos suficientes, parar
+                        if len(business_elements) >= total_needed:
+                            logger.info(f"Sufficient results loaded: {len(business_elements)}")
+                            break
+                except Exception as e:
+                    logger.warning(f"Error during scrolling: {e}")
             
             # Aplicar skip y limitar resultados
             total_to_extract = self.skip_first + self.max_results_per_location
@@ -140,11 +158,16 @@ class GMBFastScraper:
             
             # Aplicar skip: saltar los primeros N elementos
             if self.skip_first > 0:
+                if len(business_elements) <= self.skip_first:
+                    logger.warning(f"Only found {len(business_elements)} results, but skip is set to {self.skip_first}")
+                    logger.warning("No results left after skipping. Try a lower skip value or different search.")
+                    return []
                 logger.info(f"Skipping first {self.skip_first} results as requested")
                 business_elements = business_elements[self.skip_first:]
             
             # Limitar a max_results
             business_elements = business_elements[:self.max_results_per_location]
+            logger.info(f"Will extract {len(business_elements)} businesses")
             
             businesses = []
             for i, element in enumerate(business_elements):
