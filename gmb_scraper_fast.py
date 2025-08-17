@@ -164,8 +164,8 @@ class GMBFastScraper:
                 except:
                     return None
             
-            # Espera mínima para carga
-            self.quick_delay(1.5, 2)
+            # Espera mínima para carga - aumentada para asegurar carga completa
+            self.quick_delay(2.5, 3.5)
             
             business_info = {
                 'name': 'N/A',
@@ -226,27 +226,50 @@ class GMBFastScraper:
                 logger.warning("Could not confirm detail page, attempting extraction anyway")
                 # No retornar None, intentar extraer de todos modos
             
-            # 1. EXTRAER NOMBRE - Mejorado para evitar capturar "Resultados"
+            # 1. EXTRAER NOMBRE - Múltiples métodos mejorados
+            # Método 1: Buscar en el aria-label del elemento clickeado (más confiable)
             try:
-                # Buscar h1 pero excluir "Resultados"
-                h1_elements = self.driver.find_elements(By.CSS_SELECTOR, 'h1')
-                for h1 in h1_elements:
-                    text = h1.text.strip()
-                    if text and text not in ['Resultados', 'Results', 'Search results', '']:
-                        business_info['name'] = text
-                        break
+                aria_label = element.get_attribute('aria-label')
+                if aria_label:
+                    # El aria-label suele tener formato: "Nombre del negocio · Rating · Reviews"
+                    name_from_aria = aria_label.split('·')[0].strip()
+                    if name_from_aria and name_from_aria not in ['Resultados', 'Results']:
+                        business_info['name'] = name_from_aria
             except:
                 pass
             
-            # Si aún no tenemos nombre, buscar en otras ubicaciones
+            # Método 2: Buscar h1 pero con wait
             if business_info['name'] == 'N/A':
                 try:
-                    # Buscar en divs con clase específica
-                    name_divs = self.driver.find_elements(By.CSS_SELECTOR, 'div[class*="fontHeadlineLarge"]')
-                    for div in name_divs:
-                        text = div.text.strip()
-                        if text and len(text) > 2 and text not in ['Resultados', 'Results']:
+                    # Esperar a que aparezca un h1 válido
+                    time.sleep(0.5)  # Pequeña espera adicional
+                    h1_elements = self.driver.find_elements(By.CSS_SELECTOR, 'h1')
+                    for h1 in h1_elements:
+                        text = h1.text.strip()
+                        if text and text not in ['Resultados', 'Results', 'Search results', '', 'Buscar en Google Maps']:
                             business_info['name'] = text
+                            break
+                except:
+                    pass
+            
+            # Método 3: Buscar en divs con clases específicas de Google Maps
+            if business_info['name'] == 'N/A':
+                try:
+                    # Múltiples selectores posibles para el nombre
+                    name_selectors = [
+                        'div[class*="fontHeadlineLarge"]',
+                        'div[class*="DUwDvf"]',  # Clase común para títulos en GMaps
+                        'div[role="heading"][aria-level="1"]',
+                        'h1[class*="DUwDvf"]'
+                    ]
+                    for selector in name_selectors:
+                        name_elements = self.driver.find_elements(By.CSS_SELECTOR, selector)
+                        for elem in name_elements:
+                            text = elem.text.strip()
+                            if text and len(text) > 2 and text not in ['Resultados', 'Results', 'Buscar en Google Maps']:
+                                business_info['name'] = text
+                                break
+                        if business_info['name'] != 'N/A':
                             break
                 except:
                     pass
