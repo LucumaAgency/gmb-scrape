@@ -166,18 +166,21 @@ class InstallerGUI:
             current_step += 1
             self.update_progress((current_step / total_steps) * 100)
             
-            desktop = Path.home() / "Desktop"
-            if desktop.exists():
-                shortcut_content = f"""@echo off
+            # Definir el contenido del acceso directo antes de usarlo
+            shortcut_content = f"""@echo off
 cd /d "{os.getcwd()}"
 python gui.py
 pause"""
-                
+            
+            desktop = Path.home() / "Desktop"
+            if desktop.exists():
                 shortcut_file = desktop / "GMB Scraper Peru.bat"
                 with open(shortcut_file, 'w') as f:
                     f.write(shortcut_content)
                 
                 self.log(f"✓ Acceso directo creado en el escritorio")
+            else:
+                self.log("⚠ No se pudo encontrar el escritorio")
             
             start_menu = Path.home() / "AppData" / "Roaming" / "Microsoft" / "Windows" / "Start Menu" / "Programs"
             if start_menu.exists():
@@ -186,6 +189,8 @@ pause"""
                     f.write(shortcut_content)
                 
                 self.log("✓ Acceso directo creado en el menú inicio")
+            else:
+                self.log("⚠ No se pudo acceder al menú inicio")
             
             self.status_label.config(text="Verificando instalación...")
             self.log("Verificando que todo esté correctamente instalado...")
