@@ -615,6 +615,10 @@ class GMBScraper:
         location = f"{district}, {province}, {department}"
         logger.info(f"Searching: {query} in {location} (skip={skip_first}, max={max_results})")
         
+        # Update max_results if provided
+        if max_results is not None:
+            self.max_results_per_location = max_results
+        
         # Add random delay between locations
         self.random_delay(3, 6)
         
