@@ -82,6 +82,10 @@ class GMBScraperGUI:
                                         command=self.export_results, state=tk.DISABLED)
         self.export_button.pack(side=tk.LEFT, padx=5)
         
+        self.update_button = ttk.Button(control_frame, text="🔄 Actualizar", 
+                                       command=self.check_updates)
+        self.update_button.pack(side=tk.LEFT, padx=5)
+        
         self.progress_var = tk.DoubleVar()
         self.progress_bar = ttk.Progressbar(control_frame, variable=self.progress_var, 
                                            maximum=100, length=200)
@@ -451,6 +455,30 @@ class GMBScraperGUI:
         
         if file_path:
             messagebox.showinfo("Exportar", f"Resultados exportados a {file_path}")
+    
+    def check_updates(self):
+        """Verificar y aplicar actualizaciones"""
+        import subprocess
+        
+        result = messagebox.askyesno(
+            "Actualizar", 
+            "¿Deseas verificar si hay actualizaciones disponibles?\n\n"
+            "Esto cerrará la aplicación actual y ejecutará el actualizador."
+        )
+        
+        if result:
+            try:
+                # Ejecutar el script de actualización
+                if sys.platform == "win32":
+                    subprocess.Popen(["python", "update.py"], 
+                                   creationflags=subprocess.CREATE_NEW_CONSOLE)
+                else:
+                    subprocess.Popen(["python3", "update.py"])
+                
+                # Cerrar la aplicación actual
+                self.on_closing()
+            except Exception as e:
+                messagebox.showerror("Error", f"No se pudo ejecutar el actualizador:\n{e}")
             
     def on_closing(self):
         if self.scraper:
