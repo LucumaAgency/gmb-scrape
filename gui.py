@@ -17,7 +17,7 @@ except ImportError:
 from locations_peru import PERU_LOCATIONS
 
 # Version del programa
-VERSION = "1.0.4"
+VERSION = "1.0.5"
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -490,9 +490,10 @@ class GMBScraperGUI:
                 self.results_queue.put(('progress', progress))
                 self.results_queue.put(('status', f"Buscando en {dist}, {prov}..."))
                 
+                # Nota: max_results no es soportado por search_location actualmente
+                # TODO: Implementar límite de resultados en el scraper
                 results = self.scraper.search_location(
-                    query, dept, prov, dist, 
-                    max_results=self.max_results_var.get(),
+                    query, dept, prov, dist,
                     **filters
                 )
                 

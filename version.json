@@ -1,11 +1,11 @@
 {
-  "version": "1.0.4",
+  "version": "1.0.5",
   "date": "2025-01-30",
   "updated_at": "2025-01-30T00:00:00",
   "changes": [
-    "Fix botón Agregar Seleccionados ahora funciona",
-    "Usa variables de instancia para mantener estado",
-    "Mensajes claros de error si falta algo",
-    "Confirmación al agregar ubicaciones"
+    "Fix error max_results en search_location",
+    "Removido parámetro no soportado",
+    "Búsqueda ahora funciona correctamente",
+    "TODO: Implementar límite de resultados en futuras versiones"
   ]
 }
