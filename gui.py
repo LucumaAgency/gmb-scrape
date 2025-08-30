@@ -266,8 +266,15 @@ class GMBScraperGUI:
             dept = self.dept_listbox.get(dept_selection[0])
             prov = self.prov_listbox.get(prov_selection[0])
             self.dist_listbox.delete(0, tk.END)
-            for dist in PERU_LOCATIONS[dept][prov]:
-                self.dist_listbox.insert(tk.END, dist)
+            
+            # Verificar que el departamento y provincia existen antes de acceder
+            if dept in PERU_LOCATIONS and prov in PERU_LOCATIONS[dept]:
+                districts = PERU_LOCATIONS[dept][prov]
+                for dist in districts:
+                    self.dist_listbox.insert(tk.END, dist)
+                print(f"Cargados {len(districts)} distritos para {prov}, {dept}")
+            else:
+                print(f"Error: No se encontraron distritos para {prov}, {dept}")
                 
     def add_locations(self):
         dept_selection = self.dept_listbox.curselection()
