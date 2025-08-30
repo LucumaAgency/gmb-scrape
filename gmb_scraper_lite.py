@@ -20,7 +20,7 @@ try:
     PANDAS_AVAILABLE = True
 except ImportError:
     PANDAS_AVAILABLE = False
-    import csv
+import csv  # Always import csv for compatibility
 from tqdm import tqdm
 import logging
 import requests
@@ -650,6 +650,54 @@ class GMBScraper:
             with open(f'{filename}.json', 'w', encoding='utf-8') as f:
                 json.dump(self.results, f, ensure_ascii=False, indent=2)
             logger.info(f"Results saved to {filename}.json")
+    
+    def save_results_incremental(self, results_batch, filename='gmb_results', format='both', append=True):
+        """Guarda resultados de forma incremental (append o create)"""
+        import os
+        
+        if not results_batch:
+            return
+            
+        if format in ['csv', 'both']:
+            csv_file = f'{filename}.csv'
+            file_exists = os.path.exists(csv_file) and append
+            
+            if PANDAS_AVAILABLE:
+                df = pd.DataFrame(results_batch)
+                mode = 'a' if file_exists else 'w'
+                header = not file_exists
+                df.to_csv(csv_file, mode=mode, header=header, index=False, encoding='utf-8-sig')
+            else:
+                mode = 'a' if file_exists else 'w'
+                with open(csv_file, mode, newline='', encoding='utf-8-sig') as f:
+                    keys = results_batch[0].keys()
+                    writer = csv.DictWriter(f, fieldnames=keys)
+                    if not file_exists:
+                        writer.writeheader()
+                    writer.writerows(results_batch)
+            
+            logger.info(f"Batch saved to {csv_file} ({'appended' if file_exists else 'created'})")
+            
+        if format in ['json', 'both']:
+            json_file = f'{filename}.json'
+            
+            # Para JSON, necesitamos leer, agregar y reescribir
+            existing_data = []
+            if os.path.exists(json_file) and append:
+                try:
+                    with open(json_file, 'r', encoding='utf-8') as f:
+                        existing_data = json.load(f)
+                except:
+                    existing_data = []
+            
+            # Agregar nuevos resultados
+            existing_data.extend(results_batch)
+            
+            # Guardar todo
+            with open(json_file, 'w', encoding='utf-8') as f:
+                json.dump(existing_data, f, ensure_ascii=False, indent=2)
+            
+            logger.info(f"Batch saved to {json_file} ({len(existing_data)} total records)")
     
     def save_results_by_district(self, format='csv'):
         """Guarda resultados en archivos separados por distrito"""
