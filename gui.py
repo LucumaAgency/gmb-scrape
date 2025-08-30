@@ -17,7 +17,7 @@ except ImportError:
 from locations_peru import PERU_LOCATIONS
 
 # Version del programa
-VERSION = "1.0.3"
+VERSION = "1.0.4"
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -369,21 +369,56 @@ class GMBScraperGUI:
             traceback.print_exc()
                 
     def add_locations(self):
-        dept_selection = self.dept_listbox.curselection()
-        prov_selection = self.prov_listbox.curselection()
+        """Agrega las ubicaciones seleccionadas a la lista"""
+        print("\n>>> Intentando agregar ubicaciones...")
+        
+        # Obtener selecciones de distritos
         dist_selections = self.dist_listbox.curselection()
         
-        if dept_selection and prov_selection and dist_selections:
-            dept = self.dept_listbox.get(dept_selection[0])
-            prov = self.prov_listbox.get(prov_selection[0])
+        # Verificar que tenemos departamento y provincia guardados
+        if not self.current_dept:
+            print("    ❌ No hay departamento seleccionado")
+            messagebox.showwarning("Error", "Por favor seleccione un departamento primero")
+            return
             
-            for dist_idx in dist_selections:
-                dist = self.dist_listbox.get(dist_idx)
-                location = (dept, prov, dist)
-                if location not in self.selected_locations:
-                    self.selected_locations.append(location)
+        if not self.current_prov:
+            print("    ❌ No hay provincia seleccionada")
+            messagebox.showwarning("Error", "Por favor seleccione una provincia primero")
+            return
             
-            self.update_selected_locations_display()
+        if not dist_selections:
+            print("    ❌ No hay distritos seleccionados")
+            messagebox.showwarning("Error", "Por favor seleccione al menos un distrito")
+            return
+        
+        # Usar las variables de instancia guardadas
+        dept = self.current_dept
+        prov = self.current_prov
+        
+        print(f"    Departamento: {dept}")
+        print(f"    Provincia: {prov}")
+        print(f"    Distritos seleccionados: {len(dist_selections)}")
+        
+        # Agregar cada distrito seleccionado
+        added_count = 0
+        for dist_idx in dist_selections:
+            dist = self.dist_listbox.get(dist_idx)
+            location = (dept, prov, dist)
+            if location not in self.selected_locations:
+                self.selected_locations.append(location)
+                added_count += 1
+                print(f"      ✓ Agregado: {dist}")
+            else:
+                print(f"      - Ya existe: {dist}")
+        
+        self.update_selected_locations_display()
+        
+        if added_count > 0:
+            print(f"    ✅ {added_count} ubicaciones agregadas")
+            messagebox.showinfo("Éxito", f"Se agregaron {added_count} ubicaciones")
+        else:
+            print("    ⚠️ Todas las ubicaciones ya estaban en la lista")
+            messagebox.showinfo("Info", "Las ubicaciones seleccionadas ya están en la lista")
             
     def clear_locations(self):
         self.selected_locations = []
