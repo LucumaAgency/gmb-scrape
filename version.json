@@ -1,12 +1,12 @@
 {
-  "version": "1.1.0",
+  "version": "1.1.1",
   "date": "2025-01-30",
   "updated_at": "2025-01-30T00:00:00",
   "changes": [
-    "🎉 NUEVA FUNCIÓN: Paginación de resultados",
-    "Ahora puedes obtener los siguientes 20, 40, 60 resultados",
-    "Botones de página rápida (Página 1, 2, 3, 4)",
-    "Control 'Saltar primeros' para offset personalizado",
-    "El scraper carga más resultados según la página solicitada"
+    "🔒 NUEVA FUNCIÓN: Guardado incremental de resultados",
+    "Los resultados se guardan automáticamente después de cada ubicación",
+    "Previene pérdida de datos si el proceso se detiene",
+    "Checkbox para activar/desactivar guardado incremental",
+    "Compatible con formatos CSV y JSON"
   ]
 }

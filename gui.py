@@ -17,7 +17,7 @@ except ImportError:
 from locations_peru import PERU_LOCATIONS
 
 # Version del programa
-VERSION = "1.1.0"
+VERSION = "1.1.1"
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -130,13 +130,17 @@ class GMBScraperGUI:
         ttk.Checkbutton(search_frame, text="Extraer emails de sitios web", 
                        variable=self.extract_emails_var).grid(row=6, column=0, sticky=tk.W, pady=2)
         
-        ttk.Separator(search_frame, orient='horizontal').grid(row=7, column=0, sticky=(tk.W, tk.E), pady=10)
+        self.incremental_save_var = tk.BooleanVar(value=True)
+        ttk.Checkbutton(search_frame, text="Guardado incremental (guarda después de cada ubicación)", 
+                       variable=self.incremental_save_var).grid(row=7, column=0, sticky=tk.W, pady=2)
         
-        ttk.Label(search_frame, text="Paginación de resultados:", font=('Arial', 10, 'bold')).grid(row=8, column=0, sticky=tk.W, pady=5)
+        ttk.Separator(search_frame, orient='horizontal').grid(row=8, column=0, sticky=(tk.W, tk.E), pady=10)
+        
+        ttk.Label(search_frame, text="Paginación de resultados:", font=('Arial', 10, 'bold')).grid(row=9, column=0, sticky=tk.W, pady=5)
         
         # Frame para controles de paginación
         pagination_frame = ttk.Frame(search_frame)
-        pagination_frame.grid(row=9, column=0, sticky=tk.W, pady=5)
+        pagination_frame.grid(row=10, column=0, sticky=tk.W, pady=5)
         
         ttk.Label(pagination_frame, text="Resultados por ubicación:").pack(side=tk.LEFT, padx=(0, 5))
         self.max_results_var = tk.IntVar(value=20)
@@ -152,7 +156,7 @@ class GMBScraperGUI:
         
         # Botones de paginación rápida
         pagination_buttons = ttk.Frame(search_frame)
-        pagination_buttons.grid(row=10, column=0, sticky=tk.W, pady=5)
+        pagination_buttons.grid(row=11, column=0, sticky=tk.W, pady=5)
         
         ttk.Label(pagination_buttons, text="Páginas rápidas:").pack(side=tk.LEFT, padx=(0, 10))
         
@@ -174,7 +178,7 @@ class GMBScraperGUI:
         help_text = ("Ejemplo: Para obtener resultados 21-40, pon 'Saltar primeros: 20' y 'Resultados: 20'\n"
                     "O usa los botones de página rápida")
         ttk.Label(search_frame, text=help_text, font=('Arial', 8, 'italic'), 
-                 foreground='gray').grid(row=11, column=0, sticky=tk.W, pady=5)
+                 foreground='gray').grid(row=12, column=0, sticky=tk.W, pady=5)
         
         search_frame.columnconfigure(0, weight=1)
         
@@ -537,9 +541,17 @@ class GMBScraperGUI:
             }
             print(f"Filtros: {filters}")
             
+            # Generar nombre de archivo para esta sesión
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            filename = f"gmb_{query.replace(' ', '_')}_{timestamp}"
+            
+            print(f"Archivo de resultados: {filename}.csv / {filename}.json")
+            print(f"Los resultados se guardarán automáticamente después de cada ubicación\n")
+            
             total_locations = len(self.selected_locations)
             total_found = 0
             total_with_emails = 0
+            first_batch = True  # Para saber si es el primer batch
             
             for idx, (dept, prov, dist) in enumerate(self.selected_locations):
                 if self.search_thread is None:
@@ -570,9 +582,24 @@ class GMBScraperGUI:
                 emails_found = sum(1 for r in results if r.get('email', 'N/A') != 'N/A')
                 total_with_emails += emails_found
                 
+                # Guardar resultados incrementalmente después de cada ubicación
+                if results:
+                    try:
+                        self.scraper.save_results_incremental(
+                            results, 
+                            filename=filename, 
+                            format='both',
+                            append=not first_batch  # Create on first, append on rest
+                        )
+                        first_batch = False
+                        print(f"  ✓ Resultados guardados (batch {location_num}/{total_locations})")
+                    except Exception as save_error:
+                        print(f"  ⚠️ Error al guardar batch: {save_error}")
+                
                 result_text = f"\n{'='*60}\n"
                 result_text += f"📍 {dist}, {prov}, {dept}\n"
                 result_text += f"Encontrados: {len(results)} | Con email: {emails_found}\n"
+                result_text += f"Guardado: ✓ (automático)\n"
                 result_text += f"{'='*60}\n"
                 
                 for r in results:
@@ -591,19 +618,11 @@ class GMBScraperGUI:
             print(f"{'='*60}")
             print(f"Total negocios encontrados: {total_found}")
             print(f"Total con email: {total_with_emails}")
+            print(f"\n✅ Todos los resultados ya fueron guardados incrementalmente")
+            print(f"Archivo: {filename}.csv y {filename}.json")
             
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            filename = f"gmb_{query.replace(' ', '_')}_{timestamp}"
-            
-            print(f"\nGuardando resultados...")
-            try:
-                self.scraper.save_results(filename, 'both')
-                print(f"✓ Resultados guardados en: {filename}.csv y {filename}.json")
-            except Exception as save_error:
-                print(f"✗ Error al guardar: {save_error}")
-                filename = "error_al_guardar"
-            
-            self.results_queue.put(('complete', f"Búsqueda completada. Resultados guardados en {filename}"))
+            # Ya no necesitamos guardar aquí porque se guardó incrementalmente
+            self.results_queue.put(('complete', f"Búsqueda completada. Resultados en {filename}"))
             print(f"\n✅ BÚSQUEDA COMPLETADA")
             print(f"{'='*60}\n")
             
