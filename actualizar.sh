@@ -8,9 +8,17 @@ echo ""
 # Cambiar al directorio del script
 cd "$(dirname "$0")"
 
-echo "Verificando actualizaciones..."
-python3 update.py
-
+echo "Ejecutando actualización..."
 echo ""
-echo "Proceso completado."
-read -p "Presiona Enter para continuar..."
+
+# Intentar con python3, si falla usar python
+if command -v python3 &> /dev/null; then
+    python3 simple_update.py
+elif command -v python &> /dev/null; then
+    python simple_update.py
+else
+    echo "Python no encontrado. Ejecutando git pull directamente..."
+    git pull origin main
+    echo ""
+    read -p "Presiona Enter para continuar..."
+fi

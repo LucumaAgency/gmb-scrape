@@ -523,25 +523,75 @@ class GMBScraperGUI:
         """Verificar y aplicar actualizaciones"""
         import subprocess
         
+        # Primero verificar si hay actualizaciones disponibles
         result = messagebox.askyesno(
             "Actualizar", 
+            f"Versión actual: {VERSION}\n\n"
             "¿Deseas verificar si hay actualizaciones disponibles?\n\n"
-            "Esto cerrará la aplicación actual y ejecutará el actualizador."
+            "Nota: Si acabas de actualizar manualmente con git pull,\n"
+            "necesitas reiniciar la aplicación para ver los cambios."
         )
         
         if result:
             try:
-                # Ejecutar el script de actualización
-                if sys.platform == "win32":
-                    subprocess.Popen(["python", "update.py"], 
-                                   creationflags=subprocess.CREATE_NEW_CONSOLE)
-                else:
-                    subprocess.Popen(["python3", "update.py"])
+                # Mostrar mensaje de actualización
+                messagebox.showinfo(
+                    "Actualizando",
+                    "Se ejecutará el actualizador.\n\n"
+                    "1. Cierra esta ventana\n"
+                    "2. Ejecuta en terminal: git pull origin main\n"
+                    "3. Vuelve a abrir la aplicación\n\n"
+                    "O usa: python update.py"
+                )
                 
-                # Cerrar la aplicación actual
-                self.on_closing()
+                # Intentar ejecutar git pull directamente
+                try:
+                    result = subprocess.run(
+                        ["git", "pull", "origin", "main"],
+                        capture_output=True,
+                        text=True,
+                        timeout=10
+                    )
+                    
+                    if result.returncode == 0:
+                        if "Already up to date" in result.stdout:
+                            messagebox.showinfo(
+                                "Sin actualizaciones",
+                                "Ya tienes la última versión.\n\n"
+                                "Si acabas de actualizar, reinicia la aplicación."
+                            )
+                        else:
+                            messagebox.showinfo(
+                                "Actualización completada",
+                                "Se descargaron nuevas actualizaciones.\n\n"
+                                "Reinicia la aplicación para aplicar los cambios."
+                            )
+                            self.on_closing()
+                    else:
+                        messagebox.showwarning(
+                            "Actualización manual",
+                            f"No se pudo actualizar automáticamente.\n\n"
+                            "Ejecuta en terminal:\n"
+                            "git pull origin main\n\n"
+                            "Error: {result.stderr}"
+                        )
+                except subprocess.TimeoutExpired:
+                    messagebox.showwarning(
+                        "Timeout",
+                        "La actualización tardó demasiado.\n"
+                        "Intenta actualizar manualmente:\n"
+                        "git pull origin main"
+                    )
+                except FileNotFoundError:
+                    messagebox.showwarning(
+                        "Git no encontrado",
+                        "Git no está instalado o no está en el PATH.\n\n"
+                        "Actualiza manualmente con:\n"
+                        "git pull origin main"
+                    )
+                    
             except Exception as e:
-                messagebox.showerror("Error", f"No se pudo ejecutar el actualizador:\n{e}")
+                messagebox.showerror("Error", f"Error durante la actualización:\n{e}")
             
     def on_closing(self):
         if self.scraper:

@@ -6,9 +6,13 @@ echo.
 
 cd /d "%~dp0"
 
-echo Verificando actualizaciones...
-python update.py
-
+echo Ejecutando actualizacion...
 echo.
-echo Proceso completado.
-pause
+
+REM Intentar con python3 primero, luego python
+python3 simple_update.py 2>nul || python simple_update.py 2>nul || (
+    echo No se encontro Python. Ejecutando git pull directamente...
+    git pull origin main
+    echo.
+    pause
+)
