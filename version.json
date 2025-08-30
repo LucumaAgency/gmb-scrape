@@ -1,11 +1,11 @@
 {
-  "version": "1.0.1",
+  "version": "1.0.2",
   "date": "2025-01-30",
   "updated_at": "2025-01-30T00:00:00",
   "changes": [
-    "Versión mostrada en la GUI",
-    "Mejoras en debug de selección de ubicaciones",
-    "Ordenamiento alfabético de distritos",
-    "Mensajes de debug mejorados para Lima"
+    "Fix completo para carga de distritos",
+    "Mejor manejo de excepciones",
+    "Debug mejorado con mensajes más claros",
+    "Verificación paso a paso de selección"
   ]
 }
