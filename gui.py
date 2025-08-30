@@ -17,7 +17,7 @@ except ImportError:
 from locations_peru import PERU_LOCATIONS
 
 # Version del programa
-VERSION = "1.1.1"
+VERSION = "1.1.2"
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -552,6 +552,7 @@ class GMBScraperGUI:
             total_found = 0
             total_with_emails = 0
             first_batch = True  # Para saber si es el primer batch
+            all_results = []  # Colectar todos los resultados
             
             for idx, (dept, prov, dist) in enumerate(self.selected_locations):
                 if self.search_thread is None:
@@ -582,24 +583,36 @@ class GMBScraperGUI:
                 emails_found = sum(1 for r in results if r.get('email', 'N/A') != 'N/A')
                 total_with_emails += emails_found
                 
+                # Agregar a la lista total
+                all_results.extend(results)
+                
                 # Guardar resultados incrementalmente después de cada ubicación
-                if results:
+                if results and self.incremental_save_var.get():
                     try:
+                        # Determinar formato desde la GUI
+                        format_to_save = self.format_var.get()
+                        
                         self.scraper.save_results_incremental(
                             results, 
                             filename=filename, 
-                            format='both',
+                            format=format_to_save,
                             append=not first_batch  # Create on first, append on rest
                         )
                         first_batch = False
-                        print(f"  ✓ Resultados guardados (batch {location_num}/{total_locations})")
+                        print(f"  ✓ Resultados guardados incrementalmente (batch {location_num}/{total_locations})")
+                        print(f"     Archivo: {filename}.{'csv/json' if format_to_save == 'both' else format_to_save}")
                     except Exception as save_error:
                         print(f"  ⚠️ Error al guardar batch: {save_error}")
+                        import traceback
+                        traceback.print_exc()
                 
                 result_text = f"\n{'='*60}\n"
                 result_text += f"📍 {dist}, {prov}, {dept}\n"
                 result_text += f"Encontrados: {len(results)} | Con email: {emails_found}\n"
-                result_text += f"Guardado: ✓ (automático)\n"
+                if self.incremental_save_var.get() and results:
+                    result_text += f"Guardado: ✓ (incremental)\n"
+                else:
+                    result_text += f"Guardado: Pendiente (al final)\n"
                 result_text += f"{'='*60}\n"
                 
                 for r in results:
@@ -618,10 +631,21 @@ class GMBScraperGUI:
             print(f"{'='*60}")
             print(f"Total negocios encontrados: {total_found}")
             print(f"Total con email: {total_with_emails}")
-            print(f"\n✅ Todos los resultados ya fueron guardados incrementalmente")
-            print(f"Archivo: {filename}.csv y {filename}.json")
             
-            # Ya no necesitamos guardar aquí porque se guardó incrementalmente
+            # Guardar todos los resultados si no se usó guardado incremental
+            if not self.incremental_save_var.get() and all_results:
+                try:
+                    format_to_save = self.format_var.get()
+                    self.scraper.save_results(all_results, filename=filename, format=format_to_save)
+                    print(f"\n✅ Todos los resultados guardados en {filename}.{format_to_save if format_to_save != 'both' else 'csv/json'}")
+                except Exception as save_error:
+                    print(f"\n❌ Error al guardar resultados finales: {save_error}")
+                    import traceback
+                    traceback.print_exc()
+            elif self.incremental_save_var.get():
+                print(f"\n✅ Todos los resultados ya fueron guardados incrementalmente")
+                print(f"Archivo: {filename}.{'csv/json' if self.format_var.get() == 'both' else self.format_var.get()}")
+            
             self.results_queue.put(('complete', f"Búsqueda completada. Resultados en {filename}"))
             print(f"\n✅ BÚSQUEDA COMPLETADA")
             print(f"{'='*60}\n")

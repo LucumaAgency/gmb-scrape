@@ -1,12 +1,12 @@
 {
-  "version": "1.1.1",
+  "version": "1.1.2",
   "date": "2025-01-30",
   "updated_at": "2025-01-30T00:00:00",
   "changes": [
-    "🔒 NUEVA FUNCIÓN: Guardado incremental de resultados",
-    "Los resultados se guardan automáticamente después de cada ubicación",
-    "Previene pérdida de datos si el proceso se detiene",
-    "Checkbox para activar/desactivar guardado incremental",
-    "Compatible con formatos CSV y JSON"
+    "🔧 FIX CRÍTICO: Guardado incremental corregido",
+    "Ahora los resultados SÍ se guardan después de cada ubicación",
+    "Respeta la configuración del checkbox de guardado incremental",
+    "Si está desactivado, guarda todo al final como antes",
+    "Agregado mejor debugging para verificar el guardado"
   ]
 }
