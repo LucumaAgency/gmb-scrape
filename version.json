@@ -1,11 +1,12 @@
 {
-  "version": "1.0.6",
+  "version": "1.1.0",
   "date": "2025-01-30",
   "updated_at": "2025-01-30T00:00:00",
   "changes": [
-    "Debug completo del proceso de búsqueda",
-    "Fix error result.stderr en botón actualizar",
-    "Mejor manejo de errores al guardar",
-    "Mensajes detallados en consola de todo el proceso"
+    "🎉 NUEVA FUNCIÓN: Paginación de resultados",
+    "Ahora puedes obtener los siguientes 20, 40, 60 resultados",
+    "Botones de página rápida (Página 1, 2, 3, 4)",
+    "Control 'Saltar primeros' para offset personalizado",
+    "El scraper carga más resultados según la página solicitada"
   ]
 }

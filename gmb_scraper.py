@@ -44,7 +44,7 @@ class GMBScraper:
         self.driver = uc.Chrome(options=options)
         self.wait = WebDriverWait(self.driver, 20)
         
-    def search_business(self, query, location):
+    def search_business(self, query, location, skip_first=0, max_results=None):
         try:
             search_query = f"{query} en {location}, Perú"
             url = f"https://www.google.com/maps/search/{search_query.replace(' ', '+')}"
@@ -56,16 +56,27 @@ class GMBScraper:
                 EC.presence_of_element_located((By.CSS_SELECTOR, 'div[role="feed"]'))
             )
             
+            # Calculate how many results we need to load
+            total_needed = skip_first + (max_results if max_results else 20)
+            
             last_height = 0
             scroll_attempts = 0
-            max_scrolls = 10
+            max_scrolls = 15  # Increased for pagination
             
+            # Keep scrolling until we have enough results
             while scroll_attempts < max_scrolls:
                 self.driver.execute_script("arguments[0].scrollTop = arguments[0].scrollHeight", results_container)
                 time.sleep(2)
                 
+                # Check how many results we have
+                current_results = len(self.driver.find_elements(By.CSS_SELECTOR, 'div[role="feed"] > div > div[jsaction]'))
+                if current_results >= total_needed:
+                    logger.info(f"Loaded {current_results} results, needed {total_needed}")
+                    break
+                
                 new_height = self.driver.execute_script("return arguments[0].scrollHeight", results_container)
                 if new_height == last_height:
+                    logger.info(f"No more results to load. Total found: {current_results}")
                     break
                     
                 last_height = new_height
@@ -73,8 +84,14 @@ class GMBScraper:
             
             business_elements = self.driver.find_elements(By.CSS_SELECTOR, 'div[role="feed"] > div > div[jsaction]')
             
+            # Apply pagination
+            start_idx = skip_first
+            end_idx = skip_first + max_results if max_results else len(business_elements)
+            
+            logger.info(f"Processing results from index {start_idx} to {end_idx}")
+            
             businesses = []
-            for i, element in enumerate(business_elements):
+            for i in range(start_idx, min(end_idx, len(business_elements))):
                 try:
                     # Re-find elements to avoid stale references
                     current_elements = self.driver.find_elements(By.CSS_SELECTOR, 'div[role="feed"] > div > div[jsaction]')
@@ -363,11 +380,11 @@ class GMBScraper:
                 filtered.append(business)
         return filtered
     
-    def search_location(self, query, department, province, district, **filters):
+    def search_location(self, query, department, province, district, skip_first=0, max_results=None, **filters):
         location = f"{district}, {province}, {department}"
-        logger.info(f"Searching: {query} in {location}")
+        logger.info(f"Searching: {query} in {location} (skip={skip_first}, max={max_results})")
         
-        businesses = self.search_business(query, location)
+        businesses = self.search_business(query, location, skip_first=skip_first, max_results=max_results)
         filtered_businesses = self.filter_results(businesses, **filters)
         
         for business in filtered_businesses:

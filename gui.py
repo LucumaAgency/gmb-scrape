@@ -17,7 +17,7 @@ except ImportError:
 from locations_peru import PERU_LOCATIONS
 
 # Version del programa
-VERSION = "1.0.6"
+VERSION = "1.1.0"
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -130,12 +130,51 @@ class GMBScraperGUI:
         ttk.Checkbutton(search_frame, text="Extraer emails de sitios web", 
                        variable=self.extract_emails_var).grid(row=6, column=0, sticky=tk.W, pady=2)
         
-        ttk.Label(search_frame, text="Máximo de resultados por ubicación:", font=('Arial', 10)).grid(row=7, column=0, sticky=tk.W, pady=10)
+        ttk.Separator(search_frame, orient='horizontal').grid(row=7, column=0, sticky=(tk.W, tk.E), pady=10)
         
+        ttk.Label(search_frame, text="Paginación de resultados:", font=('Arial', 10, 'bold')).grid(row=8, column=0, sticky=tk.W, pady=5)
+        
+        # Frame para controles de paginación
+        pagination_frame = ttk.Frame(search_frame)
+        pagination_frame.grid(row=9, column=0, sticky=tk.W, pady=5)
+        
+        ttk.Label(pagination_frame, text="Resultados por ubicación:").pack(side=tk.LEFT, padx=(0, 5))
         self.max_results_var = tk.IntVar(value=20)
-        max_results_spinbox = ttk.Spinbox(search_frame, from_=10, to=100, increment=10, 
+        max_results_spinbox = ttk.Spinbox(pagination_frame, from_=10, to=100, increment=10, 
                                           textvariable=self.max_results_var, width=10)
-        max_results_spinbox.grid(row=8, column=0, sticky=tk.W)
+        max_results_spinbox.pack(side=tk.LEFT, padx=5)
+        
+        ttk.Label(pagination_frame, text="Saltar primeros:").pack(side=tk.LEFT, padx=(20, 5))
+        self.skip_results_var = tk.IntVar(value=0)
+        skip_results_spinbox = ttk.Spinbox(pagination_frame, from_=0, to=500, increment=20, 
+                                           textvariable=self.skip_results_var, width=10)
+        skip_results_spinbox.pack(side=tk.LEFT, padx=5)
+        
+        # Botones de paginación rápida
+        pagination_buttons = ttk.Frame(search_frame)
+        pagination_buttons.grid(row=10, column=0, sticky=tk.W, pady=5)
+        
+        ttk.Label(pagination_buttons, text="Páginas rápidas:").pack(side=tk.LEFT, padx=(0, 10))
+        
+        def set_page(page_num):
+            """Configura el offset basado en el número de página"""
+            results_per_page = self.max_results_var.get()
+            self.skip_results_var.set((page_num - 1) * results_per_page)
+            
+        ttk.Button(pagination_buttons, text="Página 1 (1-20)", 
+                  command=lambda: set_page(1)).pack(side=tk.LEFT, padx=2)
+        ttk.Button(pagination_buttons, text="Página 2 (21-40)", 
+                  command=lambda: set_page(2)).pack(side=tk.LEFT, padx=2)
+        ttk.Button(pagination_buttons, text="Página 3 (41-60)", 
+                  command=lambda: set_page(3)).pack(side=tk.LEFT, padx=2)
+        ttk.Button(pagination_buttons, text="Página 4 (61-80)", 
+                  command=lambda: set_page(4)).pack(side=tk.LEFT, padx=2)
+        
+        # Texto de ayuda
+        help_text = ("Ejemplo: Para obtener resultados 21-40, pon 'Saltar primeros: 20' y 'Resultados: 20'\n"
+                    "O usa los botones de página rápida")
+        ttk.Label(search_frame, text=help_text, font=('Arial', 8, 'italic'), 
+                 foreground='gray').grid(row=11, column=0, sticky=tk.W, pady=5)
         
         search_frame.columnconfigure(0, weight=1)
         
@@ -475,6 +514,15 @@ class GMBScraperGUI:
             print(f"Modo headless: {self.headless_var.get()}")
             print(f"Total ubicaciones: {len(self.selected_locations)}")
             
+            skip_first = self.skip_results_var.get()
+            max_results = self.max_results_var.get()
+            
+            if skip_first > 0:
+                print(f"Paginación: Saltando primeros {skip_first} resultados")
+                print(f"Obteniendo resultados: {skip_first + 1} al {skip_first + max_results}")
+            else:
+                print(f"Obteniendo primeros {max_results} resultados")
+            
             self.scraper = GMBScraper(headless=self.headless_var.get())
             print("✓ Scraper creado")
             
@@ -506,9 +554,11 @@ class GMBScraperGUI:
                 self.results_queue.put(('status', f"Buscando en {dist}, {prov}..."))
                 
                 try:
-                    # Nota: max_results no es soportado por search_location actualmente
+                    # Pasar parámetros de paginación
                     results = self.scraper.search_location(
                         query, dept, prov, dist,
+                        skip_first=skip_first,
+                        max_results=max_results,
                         **filters
                     )
                     print(f"  → Encontrados: {len(results)} resultados")
