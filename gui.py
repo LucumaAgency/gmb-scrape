@@ -17,7 +17,7 @@ except ImportError:
 from locations_peru import PERU_LOCATIONS
 
 # Version del programa
-VERSION = "1.1.3"
+VERSION = "1.1.4"
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)

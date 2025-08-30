@@ -1,12 +1,12 @@
 {
-  "version": "1.1.3",
+  "version": "1.1.4",
   "date": "2025-01-30",
   "updated_at": "2025-01-30T00:00:00",
   "changes": [
-    "🔧 FIX: AttributeError format_var corregido",
-    "Añadido selector de formato de salida (CSV, JSON o ambos)",
-    "Corregido error 'format_var' no existe",
-    "El guardado incremental ahora respeta el formato seleccionado",
-    "Interfaz actualizada con opciones de formato"
+    "🔧 FIX: Error 'unexpected keyword argument skip_first'",
+    "Corregido el filtrado de parámetros en search_location",
+    "Solo se pasan filtros válidos a filter_results",
+    "La paginación ahora funciona correctamente",
+    "Los resultados se procesan sin errores"
   ]
 }

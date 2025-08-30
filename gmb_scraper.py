@@ -385,7 +385,9 @@ class GMBScraper:
         logger.info(f"Searching: {query} in {location} (skip={skip_first}, max={max_results})")
         
         businesses = self.search_business(query, location, skip_first=skip_first, max_results=max_results)
-        filtered_businesses = self.filter_results(businesses, **filters)
+        # Asegurarse de que solo se pasen los filtros válidos a filter_results
+        valid_filters = {k: v for k, v in filters.items() if k in ['min_rating', 'min_reviews', 'min_age_days', 'max_age_days']}
+        filtered_businesses = self.filter_results(businesses, **valid_filters)
         
         for business in filtered_businesses:
             business['department'] = department
