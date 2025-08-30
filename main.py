@@ -189,6 +189,7 @@ def cli_mode():
     parser.add_argument('--min-reviews', type=int, default=0, help='Cantidad mínima de reviews')
     parser.add_argument('--min-age', type=int, default=0, help='Antigüedad mínima en días')
     parser.add_argument('--max-age', type=int, default=36500, help='Antigüedad máxima en días')
+    parser.add_argument('--max-results', type=int, default=20, help='Máximo de resultados por ubicación')
     parser.add_argument('--output', default='gmb_results', help='Nombre del archivo de salida')
     parser.add_argument('--format', choices=['csv', 'json', 'both'], default='both', help='Formato de salida')
     parser.add_argument('--headless', action='store_true', help='Ejecutar en modo headless')
@@ -227,24 +228,23 @@ def cli_mode():
         
         print(f"🚀 Buscando '{args.query}'...")
         print(f"   - Máximo {args.max_results} resultados por ubicación")
-        print(f"   - Total estimado: {len(selected_locations) * args.max_results} negocios")
+        print(f"   - Total estimado: {len(locations) * args.max_results} negocios")
         total_found = 0
         total_with_emails = 0
         
         for dept, prov, dist in locations:
-            results = scraper.search_location(args.query, dept, prov, dist, **filters)
+            results = scraper.search_location(args.query, dept, prov, dist, max_results=args.max_results, **filters)
             total_found += len(results)
             emails_found = sum(1 for r in results if r.get('email', 'N/A') != 'N/A')
             total_with_emails += emails_found
             print(f"   ✓ {dist}, {prov}: {len(results)} resultados ({emails_found} con email)")
         
-        # Usar el nuevo método que guarda por distrito
-        scraper.save_results_by_district(format=args.format)
+        # Guardar resultados
+        scraper.save_results(filename=args.output, format=args.format)
         print(f"\n✅ Búsqueda completada:")
         print(f"   - Total de negocios: {total_found}")
         print(f"   - Con email: {total_with_emails}")
-        print(f"   - Guardado en: gmb_results/ (un archivo por distrito)")
-        print(f"   - Revisa gmb_results/summary.txt para el resumen")
+        print(f"   - Resultados guardados en: {args.output}.{args.format if args.format != 'both' else 'csv y .json'}")
         
     except Exception as e:
         logger.error(f"Error: {e}")
@@ -252,8 +252,6 @@ def cli_mode():
         scraper.close()
 
 if __name__ == "__main__":
-    import sys
-    
     if len(sys.argv) > 1 and sys.argv[1] != '--interactive':
         cli_mode()
     else:
