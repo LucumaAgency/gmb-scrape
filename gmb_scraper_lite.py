@@ -611,15 +611,17 @@ class GMBScraper:
         logger.info(f"Filter results: {len(filtered)} of {len(businesses)} businesses passed filters")
         return filtered
     
-    def search_location(self, query, department, province, district, **filters):
+    def search_location(self, query, department, province, district, skip_first=0, max_results=None, **filters):
         location = f"{district}, {province}, {department}"
-        logger.info(f"Searching: {query} in {location}")
+        logger.info(f"Searching: {query} in {location} (skip={skip_first}, max={max_results})")
         
         # Add random delay between locations
         self.random_delay(3, 6)
         
         businesses = self.search_business(query, location)
-        filtered_businesses = self.filter_results(businesses, **filters)
+        # Filter only valid parameters for filter_results
+        valid_filters = {k: v for k, v in filters.items() if k in ['min_rating', 'min_reviews', 'min_age_days', 'max_age_days']}
+        filtered_businesses = self.filter_results(businesses, **valid_filters)
         
         for business in filtered_businesses:
             business['department'] = department
