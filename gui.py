@@ -17,7 +17,7 @@ except ImportError:
 from locations_peru import PERU_LOCATIONS
 
 # Version del programa
-VERSION = "1.0.5"
+VERSION = "1.0.6"
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -468,8 +468,18 @@ class GMBScraperGUI:
         
     def perform_search(self, query):
         try:
+            print(f"\n{'='*60}")
+            print(f"INICIANDO BÚSQUEDA")
+            print(f"{'='*60}")
+            print(f"Query: '{query}'")
+            print(f"Modo headless: {self.headless_var.get()}")
+            print(f"Total ubicaciones: {len(self.selected_locations)}")
+            
             self.scraper = GMBScraper(headless=self.headless_var.get())
+            print("✓ Scraper creado")
+            
             self.scraper.init_driver()
+            print("✓ Driver inicializado")
             
             filters = {
                 'min_rating': self.min_rating_var.get(),
@@ -477,6 +487,7 @@ class GMBScraperGUI:
                 'min_age_days': self.min_age_var.get(),
                 'max_age_days': self.max_age_var.get()
             }
+            print(f"Filtros: {filters}")
             
             total_locations = len(self.selected_locations)
             total_found = 0
@@ -484,18 +495,26 @@ class GMBScraperGUI:
             
             for idx, (dept, prov, dist) in enumerate(self.selected_locations):
                 if self.search_thread is None:
+                    print("⚠️ Búsqueda detenida por el usuario")
                     break
-                    
+                
+                location_num = idx + 1
+                print(f"\n[{location_num}/{total_locations}] Buscando en {dist}, {prov}, {dept}")
+                
                 progress = ((idx + 1) / total_locations) * 100
                 self.results_queue.put(('progress', progress))
                 self.results_queue.put(('status', f"Buscando en {dist}, {prov}..."))
                 
-                # Nota: max_results no es soportado por search_location actualmente
-                # TODO: Implementar límite de resultados en el scraper
-                results = self.scraper.search_location(
-                    query, dept, prov, dist,
-                    **filters
-                )
+                try:
+                    # Nota: max_results no es soportado por search_location actualmente
+                    results = self.scraper.search_location(
+                        query, dept, prov, dist,
+                        **filters
+                    )
+                    print(f"  → Encontrados: {len(results)} resultados")
+                except Exception as e:
+                    print(f"  ✗ Error en búsqueda: {e}")
+                    results = []
                 
                 total_found += len(results)
                 emails_found = sum(1 for r in results if r.get('email', 'N/A') != 'N/A')
@@ -517,13 +536,32 @@ class GMBScraperGUI:
                 self.results_queue.put(('result', result_text))
                 self.results_queue.put(('stats', (total_found, total_with_emails)))
             
+            print(f"\n{'='*60}")
+            print(f"RESUMEN FINAL")
+            print(f"{'='*60}")
+            print(f"Total negocios encontrados: {total_found}")
+            print(f"Total con email: {total_with_emails}")
+            
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
             filename = f"gmb_{query.replace(' ', '_')}_{timestamp}"
-            self.scraper.save_results(filename, 'both')
+            
+            print(f"\nGuardando resultados...")
+            try:
+                self.scraper.save_results(filename, 'both')
+                print(f"✓ Resultados guardados en: {filename}.csv y {filename}.json")
+            except Exception as save_error:
+                print(f"✗ Error al guardar: {save_error}")
+                filename = "error_al_guardar"
             
             self.results_queue.put(('complete', f"Búsqueda completada. Resultados guardados en {filename}"))
+            print(f"\n✅ BÚSQUEDA COMPLETADA")
+            print(f"{'='*60}\n")
             
         except Exception as e:
+            print(f"\n❌ ERROR EN BÚSQUEDA: {e}")
+            print(f"Tipo de error: {type(e)}")
+            import traceback
+            traceback.print_exc()
             self.results_queue.put(('error', str(e)))
         finally:
             if self.scraper:
@@ -629,12 +667,13 @@ class GMBScraperGUI:
                             )
                             self.on_closing()
                     else:
+                        error_msg = result.stderr if result.stderr else "Error desconocido"
                         messagebox.showwarning(
                             "Actualización manual",
                             f"No se pudo actualizar automáticamente.\n\n"
                             "Ejecuta en terminal:\n"
                             "git pull origin main\n\n"
-                            "Error: {result.stderr}"
+                            f"Error: {error_msg}"
                         )
                 except subprocess.TimeoutExpired:
                     messagebox.showwarning(

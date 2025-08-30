@@ -1,11 +1,11 @@
 {
-  "version": "1.0.5",
+  "version": "1.0.6",
   "date": "2025-01-30",
   "updated_at": "2025-01-30T00:00:00",
   "changes": [
-    "Fix error max_results en search_location",
-    "Removido parámetro no soportado",
-    "Búsqueda ahora funciona correctamente",
-    "TODO: Implementar límite de resultados en futuras versiones"
+    "Debug completo del proceso de búsqueda",
+    "Fix error result.stderr en botón actualizar",
+    "Mejor manejo de errores al guardar",
+    "Mensajes detallados en consola de todo el proceso"
   ]
 }
