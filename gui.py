@@ -17,7 +17,7 @@ except ImportError:
 from locations_peru import PERU_LOCATIONS
 
 # Version del programa
-VERSION = "1.1.2"
+VERSION = "1.1.3"
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -136,11 +136,26 @@ class GMBScraperGUI:
         
         ttk.Separator(search_frame, orient='horizontal').grid(row=8, column=0, sticky=(tk.W, tk.E), pady=10)
         
-        ttk.Label(search_frame, text="Paginación de resultados:", font=('Arial', 10, 'bold')).grid(row=9, column=0, sticky=tk.W, pady=5)
+        # Formato de salida
+        ttk.Label(search_frame, text="Formato de salida:", font=('Arial', 10, 'bold')).grid(row=9, column=0, sticky=tk.W, pady=5)
+        format_frame = ttk.Frame(search_frame)
+        format_frame.grid(row=10, column=0, sticky=tk.W, pady=2)
+        
+        self.format_var = tk.StringVar(value="both")
+        ttk.Radiobutton(format_frame, text="CSV y JSON", variable=self.format_var, 
+                       value="both").pack(side=tk.LEFT, padx=5)
+        ttk.Radiobutton(format_frame, text="Solo CSV", variable=self.format_var, 
+                       value="csv").pack(side=tk.LEFT, padx=5)
+        ttk.Radiobutton(format_frame, text="Solo JSON", variable=self.format_var, 
+                       value="json").pack(side=tk.LEFT, padx=5)
+        
+        ttk.Separator(search_frame, orient='horizontal').grid(row=11, column=0, sticky=(tk.W, tk.E), pady=10)
+        
+        ttk.Label(search_frame, text="Paginación de resultados:", font=('Arial', 10, 'bold')).grid(row=12, column=0, sticky=tk.W, pady=5)
         
         # Frame para controles de paginación
         pagination_frame = ttk.Frame(search_frame)
-        pagination_frame.grid(row=10, column=0, sticky=tk.W, pady=5)
+        pagination_frame.grid(row=13, column=0, sticky=tk.W, pady=5)
         
         ttk.Label(pagination_frame, text="Resultados por ubicación:").pack(side=tk.LEFT, padx=(0, 5))
         self.max_results_var = tk.IntVar(value=20)
@@ -178,7 +193,7 @@ class GMBScraperGUI:
         help_text = ("Ejemplo: Para obtener resultados 21-40, pon 'Saltar primeros: 20' y 'Resultados: 20'\n"
                     "O usa los botones de página rápida")
         ttk.Label(search_frame, text=help_text, font=('Arial', 8, 'italic'), 
-                 foreground='gray').grid(row=12, column=0, sticky=tk.W, pady=5)
+                 foreground='gray').grid(row=14, column=0, sticky=tk.W, pady=5)
         
         search_frame.columnconfigure(0, weight=1)
         
