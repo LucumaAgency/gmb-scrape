@@ -17,7 +17,7 @@ except ImportError:
 from locations_peru import PERU_LOCATIONS
 
 # Version del programa
-VERSION = "1.0.2"
+VERSION = "1.0.3"
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -38,6 +38,10 @@ class GMBScraperGUI:
         self.search_thread = None
         self.results_queue = queue.Queue()
         self.selected_locations = []
+        
+        # Variables para tracking de selección actual
+        self.current_dept = None
+        self.current_prov = None
         
         self.setup_ui()
         self.root.protocol("WM_DELETE_WINDOW", self.on_closing)
@@ -268,21 +272,26 @@ class GMBScraperGUI:
                 print("DEBUG: No hay departamento seleccionado")
                 return
                 
-            dept = self.dept_listbox.get(selection[0])
-            print(f"\n>>> Departamento seleccionado: '{dept}'")
+            # Guardar el departamento seleccionado
+            self.current_dept = self.dept_listbox.get(selection[0])
+            print(f"\n>>> Departamento seleccionado: '{self.current_dept}'")
             
             # Limpiar listas
             self.prov_listbox.delete(0, tk.END)
             self.dist_listbox.delete(0, tk.END)
             
+            # Resetear provincia actual
+            self.current_prov = None
+            
             # Cargar provincias
-            if dept in PERU_LOCATIONS:
-                provinces = list(PERU_LOCATIONS[dept].keys())
+            if self.current_dept in PERU_LOCATIONS:
+                provinces = list(PERU_LOCATIONS[self.current_dept].keys())
                 print(f"    Cargando {len(provinces)} provincias")
                 for prov in provinces:
                     self.prov_listbox.insert(tk.END, prov)
+                print(f"    Provincias disponibles: {provinces[:5]}...")
             else:
-                print(f"    ERROR: '{dept}' no encontrado en PERU_LOCATIONS")
+                print(f"    ERROR: '{self.current_dept}' no encontrado en PERU_LOCATIONS")
                 
         except Exception as e:
             print(f"❌ EXCEPCIÓN en on_dept_select: {e}")
@@ -290,56 +299,72 @@ class GMBScraperGUI:
     def on_prov_select(self, event):
         """Maneja la selección de provincia y carga los distritos"""
         try:
-            # Obtener selecciones actuales
-            dept_selection = self.dept_listbox.curselection()
+            # Debug detallado
+            print("\n>>> EVENTO: on_prov_select disparado")
+            
+            # Obtener selección de provincia
             prov_selection = self.prov_listbox.curselection()
             
-            # Verificar que hay selecciones
-            if not dept_selection or not prov_selection:
-                print("DEBUG: No hay selección completa de departamento y provincia")
+            print(f"    prov_selection: {prov_selection}")
+            
+            # Verificar que hay provincia seleccionada
+            if len(prov_selection) == 0:
+                print("    ⚠️ No hay provincia seleccionada")
                 return
             
-            # Obtener los valores seleccionados
-            dept = self.dept_listbox.get(dept_selection[0])
+            # Usar el departamento guardado en la variable de instancia
+            if not self.current_dept:
+                print("    ⚠️ No hay departamento guardado en self.current_dept")
+                # Intentar obtenerlo del listbox como fallback
+                dept_selection = self.dept_listbox.curselection()
+                if len(dept_selection) > 0:
+                    self.current_dept = self.dept_listbox.get(dept_selection[0])
+                    print(f"    Recuperado departamento del listbox: '{self.current_dept}'")
+                else:
+                    print("    ❌ No se puede determinar el departamento")
+                    return
+            
+            # Obtener la provincia seleccionada
             prov = self.prov_listbox.get(prov_selection[0])
+            self.current_prov = prov
+            
+            print(f"    Departamento (guardado): '{self.current_dept}'")
+            print(f"    Provincia (seleccionada): '{prov}'")
             
             # Limpiar lista de distritos
             self.dist_listbox.delete(0, tk.END)
             
-            # Debug: imprimir información
-            print("\n" + "="*60)
-            print(f"EVENTO: on_prov_select")
-            print(f"  Departamento: '{dept}'")
-            print(f"  Provincia: '{prov}'")
-            
             # Verificar y cargar distritos
-            if dept not in PERU_LOCATIONS:
-                print(f"  ❌ ERROR: Departamento '{dept}' no encontrado")
-                print(f"  Departamentos disponibles: {list(PERU_LOCATIONS.keys())[:5]}...")
+            if self.current_dept not in PERU_LOCATIONS:
+                print(f"    ❌ ERROR: Departamento '{self.current_dept}' no encontrado en PERU_LOCATIONS")
+                print(f"    Claves disponibles: {list(PERU_LOCATIONS.keys())[:10]}")
                 return
             
-            if prov not in PERU_LOCATIONS[dept]:
-                print(f"  ❌ ERROR: Provincia '{prov}' no encontrada en '{dept}'")
-                print(f"  Provincias disponibles: {list(PERU_LOCATIONS[dept].keys())}")
+            if prov not in PERU_LOCATIONS[self.current_dept]:
+                print(f"    ❌ ERROR: Provincia '{prov}' no encontrada en PERU_LOCATIONS['{self.current_dept}']")
+                print(f"    Provincias disponibles: {list(PERU_LOCATIONS[self.current_dept].keys())}")
                 return
             
             # Cargar distritos
-            districts = PERU_LOCATIONS[dept][prov]
-            print(f"  ✅ Encontrados {len(districts)} distritos")
+            districts = PERU_LOCATIONS[self.current_dept][prov]
+            print(f"    ✅ Encontrados {len(districts)} distritos para {prov}, {self.current_dept}")
             
             # Insertar distritos ordenados
-            for i, dist in enumerate(sorted(districts), 1):
+            districts_sorted = sorted(districts)
+            for i, dist in enumerate(districts_sorted):
                 self.dist_listbox.insert(tk.END, dist)
-                if i <= 5:  # Mostrar primeros 5 como debug
-                    print(f"    {i}. {dist}")
+                if i < 5:  # Mostrar primeros 5 como confirmación
+                    print(f"       {i+1}. {dist}")
             
             if len(districts) > 5:
-                print(f"    ... y {len(districts)-5} más")
+                print(f"       ... y {len(districts)-5} más")
             
-            print("="*60)
+            print(f"    ✅ Distritos cargados en la lista")
             
         except Exception as e:
-            print(f"❌ EXCEPCIÓN en on_prov_select: {e}")
+            print(f"\n❌ EXCEPCIÓN en on_prov_select:")
+            print(f"    Error: {e}")
+            print(f"    Tipo: {type(e)}")
             import traceback
             traceback.print_exc()
                 

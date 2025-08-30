@@ -1,11 +1,11 @@
 {
-  "version": "1.0.2",
+  "version": "1.0.3",
   "date": "2025-01-30",
   "updated_at": "2025-01-30T00:00:00",
   "changes": [
-    "Fix completo para carga de distritos",
-    "Mejor manejo de excepciones",
-    "Debug mejorado con mensajes más claros",
-    "Verificación paso a paso de selección"
+    "Debug detallado para eventos de selección",
+    "Variables de instancia para tracking de estado",
+    "Mensajes más claros sobre qué está pasando",
+    "Fix para detección de selecciones vacías"
   ]
 }
