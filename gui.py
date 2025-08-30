@@ -16,6 +16,9 @@ except ImportError:
 
 from locations_peru import PERU_LOCATIONS
 
+# Version del programa
+VERSION = "1.0.1"
+
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
@@ -23,7 +26,7 @@ logger = logging.getLogger(__name__)
 class GMBScraperGUI:
     def __init__(self, root):
         self.root = root
-        self.root.title("GMB Scraper Peru - Interfaz Gráfica")
+        self.root.title(f"GMB Scraper Peru v{VERSION} - Interfaz Gráfica")
         self.root.geometry("900x700")
         
         self.root.configure(bg='#f0f0f0')
@@ -57,6 +60,10 @@ class GMBScraperGUI:
         subtitle_label = ttk.Label(header_frame, text="Extractor de datos de negocios con filtros avanzados",
                                   font=('Arial', 10))
         subtitle_label.pack()
+        
+        version_label = ttk.Label(header_frame, text=f"Versión {VERSION}",
+                                 font=('Arial', 9, 'italic'), foreground='gray')
+        version_label.pack()
         
         notebook = ttk.Notebook(main_frame)
         notebook.grid(row=1, column=0, sticky=(tk.W, tk.E, tk.N, tk.S), pady=10)
@@ -271,14 +278,27 @@ class GMBScraperGUI:
             prov = self.prov_listbox.get(prov_selection[0])
             self.dist_listbox.delete(0, tk.END)
             
+            # Debug: imprimir información
+            print(f"DEBUG: Departamento seleccionado: '{dept}'")
+            print(f"DEBUG: Provincia seleccionada: '{prov}'")
+            
             # Verificar que el departamento y provincia existen antes de acceder
-            if dept in PERU_LOCATIONS and prov in PERU_LOCATIONS[dept]:
-                districts = PERU_LOCATIONS[dept][prov]
-                for dist in districts:
-                    self.dist_listbox.insert(tk.END, dist)
-                print(f"Cargados {len(districts)} distritos para {prov}, {dept}")
+            if dept in PERU_LOCATIONS:
+                print(f"DEBUG: Departamento '{dept}' encontrado en PERU_LOCATIONS")
+                if prov in PERU_LOCATIONS[dept]:
+                    districts = PERU_LOCATIONS[dept][prov]
+                    print(f"DEBUG: Provincia '{prov}' encontrada con {len(districts)} distritos")
+                    for dist in sorted(districts):
+                        self.dist_listbox.insert(tk.END, dist)
+                    print(f"✓ Cargados {len(districts)} distritos para {prov}, {dept}")
+                    # Mostrar los primeros 5 distritos como debug
+                    print(f"  Muestra: {districts[:5]}")
+                else:
+                    print(f"ERROR: Provincia '{prov}' no encontrada en departamento '{dept}'")
+                    print(f"  Provincias disponibles: {list(PERU_LOCATIONS[dept].keys())}")
             else:
-                print(f"Error: No se encontraron distritos para {prov}, {dept}")
+                print(f"ERROR: Departamento '{dept}' no encontrado en PERU_LOCATIONS")
+                print(f"  Departamentos disponibles: {list(PERU_LOCATIONS.keys())[:10]}...")
                 
     def add_locations(self):
         dept_selection = self.dept_listbox.curselection()
