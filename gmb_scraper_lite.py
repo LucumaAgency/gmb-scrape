@@ -33,12 +33,31 @@ urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
+
+class BloqueoDetectado(Exception):
+    """Google sirvio captcha / consentimiento / pagina vacia sospechosa.
+
+    Se lanza para ABORTAR la corrida. Seguir buscando despues de un bloqueo
+    solo produce ceros silenciosos que parecen "no hay negocios en ese rubro".
+    """
+
+
+class LimiteSesionAlcanzado(Exception):
+    """Se llego al tope de fichas configurado para la sesion."""
+
+
 class GMBScraper:
     def __init__(self, headless=False):
         self.driver = None
         self.headless = headless
         self.results = []
         self.max_results_per_location = 10  # Limit to 10 results
+
+        # Control de volumen (ver PRUEBA-DE-HUMO.md): ~13s por ficha.
+        # 300-500 fichas/dia por IP es el rango conservador recomendado.
+        self.max_fichas_sesion = None       # tope duro de fichas por corrida
+        self.fichas_extraidas = 0           # contador de la sesion
+        self.pausa_entre_busquedas = (20, 40)  # segundos entre una busqueda y otra
         self.user_agents = [
             'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
             'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36',
@@ -100,6 +119,57 @@ class GMBScraper:
             logger.debug(f"No se pudo aislar el panel de detalle: {e}")
         logger.warning("Panel de detalle no encontrado, usando el documento completo")
         return self.driver
+
+    # Señales de que Google dejo de servir resultados reales
+    SENALES_BLOQUEO = [
+        'unusual traffic', 'trafico inusual', 'tráfico inusual',
+        'systems have detected', 'our systems have detected',
+        'no eres un robot', 'not a robot', 'verificar que eres',
+        'captcha', 'recaptcha',
+    ]
+    SENALES_CONSENTIMIENTO = [
+        'antes de continuar', 'before you continue',
+        'acepto', 'aceptar todo', 'accept all',
+    ]
+
+    def detectar_bloqueo(self):
+        """Distingue 'no hay resultados' de 'Google nos corto'.
+
+        Devuelve el motivo (str) si detecta bloqueo, o None si la pagina
+        parece legitima y simplemente no hubo negocios.
+        """
+        try:
+            url_actual = (self.driver.current_url or '').lower()
+            if '/sorry/' in url_actual or 'consent.google' in url_actual:
+                return f"URL de bloqueo: {self.driver.current_url}"
+
+            # iframe de recaptcha
+            if self.driver.find_elements(By.CSS_SELECTOR,
+                                         'iframe[src*="recaptcha"], iframe[title*="captcha"], form#captcha-form'):
+                return "captcha presente en la pagina"
+
+            texto = ''
+            try:
+                texto = (self.driver.find_element(By.TAG_NAME, 'body').text or '').lower()
+            except Exception:
+                pass
+
+            for senal in self.SENALES_BLOQUEO:
+                if senal in texto:
+                    return f"texto de bloqueo: '{senal}'"
+
+            # Muro de consentimiento sin resultados: tampoco vamos a poder scrapear
+            if not self.driver.find_elements(By.CSS_SELECTOR, 'div[role="feed"], a[href*="/maps/place/"]'):
+                for senal in self.SENALES_CONSENTIMIENTO:
+                    if senal in texto:
+                        return f"muro de consentimiento: '{senal}'"
+                if len(texto.strip()) < 200:
+                    return "pagina practicamente vacia (posible bloqueo silencioso)"
+
+        except Exception as e:
+            logger.debug(f"Error comprobando bloqueo: {e}")
+
+        return None
 
     def random_delay(self, min_seconds=1, max_seconds=3):
         """Random delay to simulate human behavior"""
@@ -196,7 +266,19 @@ class GMBScraper:
                     pass
             
             if not business_elements:
-                logger.warning("No business elements found")
+                # Sin tarjetas: puede ser un rubro sin negocios... o un bloqueo.
+                # Distinguirlo es la diferencia entre un CSV incompleto y una
+                # corrida de 3 horas tirando ceros sin que nadie se entere.
+                motivo = self.detectar_bloqueo()
+                if motivo:
+                    try:
+                        captura = f"bloqueo_{int(time.time())}.png"
+                        self.driver.save_screenshot(captura)
+                        logger.error(f"Captura del bloqueo guardada en {captura}")
+                    except Exception:
+                        pass
+                    raise BloqueoDetectado(motivo)
+                logger.warning("No business elements found (la pagina cargo bien: rubro sin resultados)")
                 return []
             
             # Scroll to load more results (but not too much)
@@ -249,13 +331,24 @@ class GMBScraper:
                     business_data = self.extract_business_info(current_elements[i], location)
                     if business_data:
                         businesses.append(business_data)
+                        self.fichas_extraidas += 1
                         logger.info(f"Extracted business {i+1}: {business_data.get('name', 'Unknown')}")
+
+                        if (self.max_fichas_sesion is not None
+                                and self.fichas_extraidas >= self.max_fichas_sesion):
+                            logger.warning(
+                                f"Tope de sesion alcanzado ({self.max_fichas_sesion} fichas), cortando aqui")
+                            return businesses
+                except (BloqueoDetectado, LimiteSesionAlcanzado):
+                    raise
                 except Exception as e:
                     logger.debug(f"Error extracting business {i}: {e}")
                     continue
                     
             return businesses
-            
+
+        except (BloqueoDetectado, LimiteSesionAlcanzado):
+            raise  # nunca tragarse un bloqueo: debe abortar la corrida
         except Exception as e:
             logger.error(f"Error searching businesses: {e}")
             return []
@@ -738,9 +831,13 @@ class GMBScraper:
         if max_results is not None:
             self.max_results_per_location = max_results
         
-        # Add random delay between locations
-        self.random_delay(3, 6)
-        
+        # Pausa entre busquedas: es la que marca el ritmo real de la corrida.
+        # 3-6s servia para 1 busqueda de prueba; para volumen hay que ir lento.
+        if self.results:
+            pausa_min, pausa_max = self.pausa_entre_busquedas
+            logger.info(f"Pausa entre busquedas: {pausa_min}-{pausa_max}s")
+            self.random_delay(pausa_min, pausa_max)
+
         businesses = self.search_business(query, location)
         # Filter only valid parameters for filter_results
         valid_filters = {k: v for k, v in filters.items() if k in ['min_rating', 'min_reviews', 'min_age_days', 'max_age_days']}
