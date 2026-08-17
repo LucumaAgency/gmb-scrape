@@ -70,11 +70,25 @@ Siempre cae al `except` y escribe 'N/A'.
 `python3 smoke_test.py restaurantes Miraflores` → ratings ahora distintos y correctos por negocio
 (Paco Yonque 4.9 / 1599, contrastado contra el DOM real; antes salía 4.9 / 4700 repetido).
 
-## Defecto pendiente detectado en la verificación
+## Duplicados y patrocinados (resuelto)
 
-**Duplicados**: el mismo negocio se extrae dos veces en una sola búsqueda (p. ej. "Paco Yonque" y
-"Estudio Contable Laney" aparecieron 2/3 veces). El scraper vuelve al listado y reprocesa la misma
-tarjeta. Falta deduplicar por `place_id` o por nombre+dirección antes de guardar.
+Los duplicados no venían de "volver al listado" sino de que **Maps reordena el listado después de
+cada clic**: unas tarjetas se abrían dos veces y otras no se visitaban nunca. Por eso pedir 10
+devolvía 6-9.
+
+Ahora `search_business` no hace clic en el listado:
+
+1. `recolectar_candidatos()` recorre el listado una sola vez (scrolleando hasta juntar de más),
+   descarta anuncios y saca `(place_id, href, nombre)` de cada tarjeta.
+2. Cada ficha se abre navegando a su URL (`extraer_desde_url`), no clicando.
+3. `self.vistos` guarda los `place_id` de la sesión; queda una segunda red por nombre+dirección
+   para las fichas sin `place_id` legible.
+
+El `place_id` sale del token `!1s` del href y se guarda en cada resultado.
+
+**Resultado medido** (inmobiliaria, San Isidro, `--por-busqueda 10`): 10 fichas, 10 nombres únicos,
+10 place_id únicos, y el ritmo bajó de **13 a 9 s por ficha** (~400/hora) porque desaparecieron los
+clics fallidos y las vueltas atrás.
 
 ## Lo que la prueba NO cubrió
 

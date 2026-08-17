@@ -55,6 +55,7 @@ class GMBScraper:
 
         # Control de volumen (ver PRUEBA-DE-HUMO.md): ~13s por ficha.
         # 300-500 fichas/dia por IP es el rango conservador recomendado.
+        self.vistos = set()                 # place_ids ya extraidos en la sesion
         self.max_fichas_sesion = None       # tope duro de fichas por corrida
         self.fichas_extraidas = 0           # contador de la sesion
         self.pausa_entre_busquedas = (20, 40)  # segundos entre una busqueda y otra
@@ -131,6 +132,52 @@ class GMBScraper:
         'antes de continuar', 'before you continue',
         'acepto', 'aceptar todo', 'accept all',
     ]
+
+    # Etiquetas con que Google marca un resultado pagado
+    MARCAS_ANUNCIO = ['patrocinad', 'sponsored', 'anuncio', 'publicidad', 'ad ·']
+
+    def es_patrocinado(self, tarjeta):
+        """True si la tarjeta del listado es un anuncio.
+
+        No se abren como ficha normal: consumian un lugar del cupo y por eso
+        pedir 10 negocios devolvia 9.
+        """
+        try:
+            contenedor = tarjeta
+            try:
+                contenedor = tarjeta.find_element(
+                    By.XPATH, './ancestor::div[contains(@class,"Nv2PK")][1]')
+            except Exception:
+                pass
+
+            texto = (contenedor.text or '').lower()
+            if any(marca in texto for marca in self.MARCAS_ANUNCIO):
+                return True
+
+            aria = (tarjeta.get_attribute('aria-label') or '').lower()
+            if any(marca in aria for marca in self.MARCAS_ANUNCIO):
+                return True
+
+        except Exception as e:
+            logger.debug(f"No se pudo comprobar si es anuncio: {e}")
+
+        return False
+
+    @staticmethod
+    def extraer_place_id(href):
+        """Saca el identificador estable del negocio desde el href de la tarjeta.
+
+        El href trae .../data=!4m7!3m6!1s0x9105b873f28de1c7:0x6...!8m2...
+        donde el token tras !1s identifica al lugar.
+        """
+        if not href:
+            return ''
+        m = re.search(r'!1s([^!]+)', href)
+        if m:
+            return m.group(1)
+        # Fallback: el nombre dentro de la URL
+        m = re.search(r'/maps/place/([^/@]+)', href)
+        return m.group(1) if m else ''
 
     def detectar_bloqueo(self):
         """Distingue 'no hay resultados' de 'Google nos corto'.
@@ -281,70 +328,59 @@ class GMBScraper:
                 logger.warning("No business elements found (la pagina cargo bien: rubro sin resultados)")
                 return []
             
-            # Scroll to load more results (but not too much)
-            try:
-                results_container = self.driver.find_element(By.CSS_SELECTOR, 'div[role="feed"]')
-                self.human_scroll(results_container)
-            except:
-                pass
-            
-            # Re-find elements after scroll
-            try:
-                business_elements = self.driver.find_elements(By.CSS_SELECTOR, 'a[href*="/maps/place/"]')
-            except:
-                pass
-            
-            # Limit results to max_results_per_location
-            business_elements = business_elements[:self.max_results_per_location]
-            logger.info(f"Processing {len(business_elements)} businesses (max: {self.max_results_per_location})")
-            
-            businesses = []
-            for i in range(min(len(business_elements), self.max_results_per_location)):
-                try:
-                    # Random delay between businesses
-                    self.random_delay(1, 3)
-                    
-                    # Random mouse movement
-                    if random.random() > 0.7:
-                        self.random_mouse_movement()
-                    
-                    # Re-find elements each time because DOM changes after clicks
-                    current_elements = self.driver.find_elements(By.CSS_SELECTOR, 'a[href*="/maps/place/"]')
-                    if i >= len(current_elements):
-                        logger.warning(f"Element {i} no longer exists, skipping")
-                        continue
-                    
-                    # Extract the business name from the element before clicking
-                    try:
-                        # Get the aria-label which usually contains the business name
-                        aria_label = current_elements[i].get_attribute('aria-label')
-                        if aria_label:
-                            # Clean up the aria-label to get just the name
-                            preview_name = aria_label.split('·')[0].strip()
-                        else:
-                            preview_name = f"Business {i+1}"
-                    except:
-                        preview_name = f"Business {i+1}"
-                    
-                    logger.info(f"Processing {i+1}/{self.max_results_per_location}: {preview_name}")
-                    
-                    business_data = self.extract_business_info(current_elements[i], location)
-                    if business_data:
-                        businesses.append(business_data)
-                        self.fichas_extraidas += 1
-                        logger.info(f"Extracted business {i+1}: {business_data.get('name', 'Unknown')}")
+            # 1) Recolectar las URLs del listado, bajando hasta juntar
+            #    suficientes candidatos (los anuncios y repetidos se descartan).
+            candidatos = self.recolectar_candidatos()
 
-                        if (self.max_fichas_sesion is not None
-                                and self.fichas_extraidas >= self.max_fichas_sesion):
-                            logger.warning(
-                                f"Tope de sesion alcanzado ({self.max_fichas_sesion} fichas), cortando aqui")
-                            return businesses
-                except (BloqueoDetectado, LimiteSesionAlcanzado):
-                    raise
-                except Exception as e:
-                    logger.debug(f"Error extracting business {i}: {e}")
+            if not candidatos:
+                logger.warning("Ninguna tarjeta utilizable en el listado")
+                return []
+
+            logger.info(f"{len(candidatos)} candidatos unicos "
+                        f"(objetivo: {self.max_results_per_location})")
+
+            # 2) Abrir cada ficha por su URL. Nada de clics: Maps reordena el
+            #    listado despues de cada uno y eso repetia unos negocios y se
+            #    saltaba otros.
+            businesses = []
+            for idx, (place_id, href, nombre) in enumerate(candidatos, 1):
+                if len(businesses) >= self.max_results_per_location:
+                    break
+
+                if place_id in self.vistos:
+                    logger.info(f"{idx}. {nombre}: ya extraido, se salta")
                     continue
-                    
+
+                logger.info(f"{idx}. ficha {len(businesses)+1}/"
+                            f"{self.max_results_per_location}: {nombre}")
+
+                self.random_delay(1, 3)
+                business_data = self.extraer_desde_url(href, location)
+
+                if not business_data:
+                    continue
+
+                business_data['place_id'] = place_id
+                clave = place_id or (f"{business_data.get('name','')}|"
+                                     f"{business_data.get('address','')}").lower()
+                if clave in self.vistos:
+                    logger.info(f"Repetido tras abrir la ficha: {business_data.get('name')}")
+                    continue
+
+                self.vistos.add(clave)
+                businesses.append(business_data)
+                self.fichas_extraidas += 1
+
+                if (self.max_fichas_sesion is not None
+                        and self.fichas_extraidas >= self.max_fichas_sesion):
+                    logger.warning(
+                        f"Tope de sesion alcanzado ({self.max_fichas_sesion} fichas), cortando aqui")
+                    return businesses
+
+            if len(businesses) < self.max_results_per_location:
+                logger.info(f"Se agotaron los candidatos: {len(businesses)} fichas "
+                            f"de {self.max_results_per_location} pedidas")
+
             return businesses
 
         except (BloqueoDetectado, LimiteSesionAlcanzado):
@@ -353,6 +389,231 @@ class GMBScraper:
             logger.error(f"Error searching businesses: {e}")
             return []
     
+    def _extraer_datos_ficha(self, location):
+        """Extrae los datos de la ficha YA abierta (por clic o por URL)."""
+        business_info = {
+            'location': location,
+            'timestamp': datetime.now().isoformat()
+        }
+
+        # Aislar la ficha abierta: sin esto rating/reviews salen del listado
+        panel = self.get_detail_panel()
+
+        # Extract name - try multiple selectors
+        name_found = False
+        name_selectors = [
+            'h1.DUwDvf',
+            'h1[class*="fontHeadline"]',
+            'h1[class*="fontTitle"]',
+            'div[class*="fontTitle"] span',
+            'h1'
+        ]
+        
+        for selector in name_selectors:
+            try:
+                if selector == 'h1':
+                    # For generic h1, get all and filter
+                    h1_elements = self.driver.find_elements(By.TAG_NAME, 'h1')
+                    for h1 in h1_elements:
+                        if h1.text and h1.text not in ["Resultados", "Results", ""]:
+                            business_info['name'] = h1.text
+                            name_found = True
+                            logger.info(f"Found name with h1: {business_info['name']}")
+                            break
+                else:
+                    name_element = self.driver.find_element(By.CSS_SELECTOR, selector)
+                    if name_element.text:
+                        business_info['name'] = name_element.text
+                        name_found = True
+                        logger.info(f"Found name with {selector}: {business_info['name']}")
+                        break
+            except:
+                continue
+        
+        if not name_found:
+            business_info['name'] = 'N/A'
+            logger.warning("Could not find business name")
+        
+        # Extract rating y review count (ambos viven en div.F7nice de la ficha)
+        business_info['rating'] = 0.0  # Default
+        business_info['review_count'] = 0  # Default
+        try:
+            # Method 1: bloque de rating de la ficha: "4.9" + "(1,599)"
+            for block in panel.find_elements(By.CSS_SELECTOR, 'div.F7nice'):
+                texto = (block.text or '').replace('\xa0', ' ')
+
+                m = re.search(r'(\d+[.,]\d+)', texto)
+                if m:
+                    valor = float(m.group(1).replace(',', '.'))
+                    if 0 < valor <= 5:
+                        business_info['rating'] = valor
+
+                m = re.search(r'\(([\d.,\s]+)\)', texto)
+                if m:
+                    digitos = re.sub(r'\D', '', m.group(1))
+                    if digitos:
+                        business_info['review_count'] = int(digitos)
+
+                if business_info['rating'] or business_info['review_count']:
+                    break
+
+            # Method 2: aria-label de las estrellas y de las opiniones
+            if business_info['rating'] == 0.0:
+                for span in panel.find_elements(By.CSS_SELECTOR, 'span[role="img"][aria-label]'):
+                    aria = span.get_attribute('aria-label') or ''
+                    m = re.search(r'([\d.,]+)\s*(?:star|estrella)', aria.lower())
+                    if m:
+                        valor = float(m.group(1).replace(',', '.'))
+                        if 0 < valor <= 5:
+                            business_info['rating'] = valor
+                            break
+
+            if business_info['review_count'] == 0:
+                for elem in panel.find_elements(By.CSS_SELECTOR, '[aria-label]'):
+                    aria = (elem.get_attribute('aria-label') or '').replace('\xa0', ' ')
+                    m = re.search(r'([\d.,]+)\s*(?:opinion|opiniones|reseña|reseñas|review|reviews)', aria.lower())
+                    if m:
+                        digitos = re.sub(r'\D', '', m.group(1))
+                        if digitos:
+                            business_info['review_count'] = int(digitos)
+                            break
+
+        except Exception as e:
+            logger.debug(f"Could not extract rating/reviews: {e}")
+        
+        # Extract address
+        try:
+            address_button = panel.find_element(By.CSS_SELECTOR, 'button[data-item-id="address"]')
+            business_info['address'] = address_button.get_attribute('aria-label').replace('Address: ', '').replace('Dirección: ', '')
+        except:
+            business_info['address'] = 'N/A'
+
+        # Extract phone
+        try:
+            phone_button = panel.find_element(By.CSS_SELECTOR, 'button[data-item-id*="phone"]')
+            phone_text = phone_button.get_attribute('aria-label')
+            business_info['phone'] = phone_text.replace('Phone: ', '').replace('Teléfono: ', '')
+        except:
+            business_info['phone'] = 'N/A'
+
+        # Extract website
+        try:
+            website_button = panel.find_element(By.CSS_SELECTOR, 'a[data-item-id="authority"]')
+            business_info['website'] = website_button.get_attribute('href')
+        except:
+            business_info['website'] = 'N/A'
+
+        # Extract category
+        try:
+            category_button = panel.find_element(By.CSS_SELECTOR, 'button[jsaction*="category"]')
+            business_info['category'] = category_button.text
+        except:
+            business_info['category'] = 'N/A'
+
+        # Extract hours (la interfaz esta en espanol: "horario", no "hours")
+        business_info['hours'] = self.extract_hours(panel)
+
+        # Extract emails
+        emails = self.extract_emails_from_gmb(panel)
+
+        # Si el negocio tiene web, siempre buscar el email ahi (antes se
+        # saltaba el 50% de las veces y se perdian leads en silencio)
+        if business_info['website'] != 'N/A':
+            self.random_delay(1, 2)
+            website_emails = self.extract_emails_from_website(business_info['website'])
+            emails.extend(website_emails)
+        
+        # Remove duplicates and validate emails
+        emails = list(set([email for email in emails if self.validate_email(email)]))
+        business_info['emails'] = emails if emails else []
+        business_info['email'] = emails[0] if emails else 'N/A'
+        
+        # Log what we extracted
+        logger.info(f"Extracted: {business_info.get('name', 'N/A')} - Rating: {business_info.get('rating', 0)} - Reviews: {business_info.get('review_count', 0)}")
+        
+        return business_info
+    def recolectar_candidatos(self, max_scrolls=6):
+        """Recorre el listado y devuelve [(place_id, href, nombre)] sin repetidos.
+
+        Se hace de una sola pasada y ANTES de abrir ninguna ficha: en cuanto se
+        abre una, Maps reordena el listado y los indices dejan de servir.
+        """
+        candidatos = []
+        ids_vistos = set()
+        objetivo = self.max_results_per_location
+
+        for intento in range(max_scrolls + 1):
+            for tarjeta in self.driver.find_elements(By.CSS_SELECTOR, 'a[href*="/maps/place/"]'):
+                try:
+                    href = tarjeta.get_attribute('href')
+                    place_id = self.extraer_place_id(href)
+                    if not href or place_id in ids_vistos:
+                        continue
+
+                    if self.es_patrocinado(tarjeta):
+                        logger.info(f"Anuncio descartado: "
+                                    f"{(tarjeta.get_attribute('aria-label') or '')[:40]}")
+                        ids_vistos.add(place_id)
+                        continue
+
+                    nombre = (tarjeta.get_attribute('aria-label') or '').split('·')[0].strip()
+                    ids_vistos.add(place_id)
+                    candidatos.append((place_id, href, nombre or 'sin nombre'))
+                except Exception as e:
+                    logger.debug(f"Tarjeta ilegible: {e}")
+
+            # Pedimos de mas: parte de los candidatos se caera al abrirlos
+            if len(candidatos) >= objetivo + 3 or intento == max_scrolls:
+                break
+
+            antes = len(candidatos)
+            try:
+                feed = self.driver.find_element(By.CSS_SELECTOR, 'div[role="feed"]')
+                self.driver.execute_script(
+                    "arguments[0].scrollTop = arguments[0].scrollHeight", feed)
+            except Exception:
+                logger.debug("No hay feed que scrollear")
+                break
+
+            self.random_delay(1.5, 3)
+            if len(self.driver.find_elements(By.CSS_SELECTOR, 'a[href*="/maps/place/"]')) <= antes:
+                logger.info("El listado ya no carga mas resultados")
+                break
+
+        return candidatos
+
+    def extraer_desde_url(self, href, location):
+        """Abre la ficha por su URL y extrae los datos.
+
+        Es la ruta preferida: hacer clic en el listado hace que Maps lo
+        reordene, con lo que unas tarjetas se repiten y otras no se visitan
+        nunca. Navegando directo, cada negocio se abre una sola vez.
+        """
+        try:
+            self.driver.get(href)
+            self.random_delay(2.5, 4)
+
+            abierta = False
+            for h1 in self.driver.find_elements(By.TAG_NAME, 'h1'):
+                if h1.text and h1.text not in ('Resultados', 'Results', ''):
+                    abierta = True
+                    break
+
+            if not abierta:
+                motivo = self.detectar_bloqueo()
+                if motivo:
+                    raise BloqueoDetectado(motivo)
+                logger.warning(f"La ficha no cargo: {href[:80]}")
+                return None
+
+            return self._extraer_datos_ficha(location)
+
+        except BloqueoDetectado:
+            raise
+        except Exception as e:
+            logger.warning(f"Error abriendo la ficha por URL: {e}")
+            return None
+
     def extract_business_info(self, element, location):
         try:
             # Try to click with random delay
@@ -432,146 +693,10 @@ class GMBScraper:
                     pass
                 return None
             
-            business_info = {
-                'location': location,
-                'timestamp': datetime.now().isoformat()
-            }
+            business_info = self._extraer_datos_ficha(location)
+            if business_info is None:
+                return None
 
-            # Aislar la ficha abierta: sin esto rating/reviews salen del listado
-            panel = self.get_detail_panel()
-
-            # Extract name - try multiple selectors
-            name_found = False
-            name_selectors = [
-                'h1.DUwDvf',
-                'h1[class*="fontHeadline"]',
-                'h1[class*="fontTitle"]',
-                'div[class*="fontTitle"] span',
-                'h1'
-            ]
-            
-            for selector in name_selectors:
-                try:
-                    if selector == 'h1':
-                        # For generic h1, get all and filter
-                        h1_elements = self.driver.find_elements(By.TAG_NAME, 'h1')
-                        for h1 in h1_elements:
-                            if h1.text and h1.text not in ["Resultados", "Results", ""]:
-                                business_info['name'] = h1.text
-                                name_found = True
-                                logger.info(f"Found name with h1: {business_info['name']}")
-                                break
-                    else:
-                        name_element = self.driver.find_element(By.CSS_SELECTOR, selector)
-                        if name_element.text:
-                            business_info['name'] = name_element.text
-                            name_found = True
-                            logger.info(f"Found name with {selector}: {business_info['name']}")
-                            break
-                except:
-                    continue
-            
-            if not name_found:
-                business_info['name'] = 'N/A'
-                logger.warning("Could not find business name")
-            
-            # Extract rating y review count (ambos viven en div.F7nice de la ficha)
-            business_info['rating'] = 0.0  # Default
-            business_info['review_count'] = 0  # Default
-            try:
-                # Method 1: bloque de rating de la ficha: "4.9" + "(1,599)"
-                for block in panel.find_elements(By.CSS_SELECTOR, 'div.F7nice'):
-                    texto = (block.text or '').replace('\xa0', ' ')
-
-                    m = re.search(r'(\d+[.,]\d+)', texto)
-                    if m:
-                        valor = float(m.group(1).replace(',', '.'))
-                        if 0 < valor <= 5:
-                            business_info['rating'] = valor
-
-                    m = re.search(r'\(([\d.,\s]+)\)', texto)
-                    if m:
-                        digitos = re.sub(r'\D', '', m.group(1))
-                        if digitos:
-                            business_info['review_count'] = int(digitos)
-
-                    if business_info['rating'] or business_info['review_count']:
-                        break
-
-                # Method 2: aria-label de las estrellas y de las opiniones
-                if business_info['rating'] == 0.0:
-                    for span in panel.find_elements(By.CSS_SELECTOR, 'span[role="img"][aria-label]'):
-                        aria = span.get_attribute('aria-label') or ''
-                        m = re.search(r'([\d.,]+)\s*(?:star|estrella)', aria.lower())
-                        if m:
-                            valor = float(m.group(1).replace(',', '.'))
-                            if 0 < valor <= 5:
-                                business_info['rating'] = valor
-                                break
-
-                if business_info['review_count'] == 0:
-                    for elem in panel.find_elements(By.CSS_SELECTOR, '[aria-label]'):
-                        aria = (elem.get_attribute('aria-label') or '').replace('\xa0', ' ')
-                        m = re.search(r'([\d.,]+)\s*(?:opinion|opiniones|reseña|reseñas|review|reviews)', aria.lower())
-                        if m:
-                            digitos = re.sub(r'\D', '', m.group(1))
-                            if digitos:
-                                business_info['review_count'] = int(digitos)
-                                break
-
-            except Exception as e:
-                logger.debug(f"Could not extract rating/reviews: {e}")
-            
-            # Extract address
-            try:
-                address_button = panel.find_element(By.CSS_SELECTOR, 'button[data-item-id="address"]')
-                business_info['address'] = address_button.get_attribute('aria-label').replace('Address: ', '').replace('Dirección: ', '')
-            except:
-                business_info['address'] = 'N/A'
-
-            # Extract phone
-            try:
-                phone_button = panel.find_element(By.CSS_SELECTOR, 'button[data-item-id*="phone"]')
-                phone_text = phone_button.get_attribute('aria-label')
-                business_info['phone'] = phone_text.replace('Phone: ', '').replace('Teléfono: ', '')
-            except:
-                business_info['phone'] = 'N/A'
-
-            # Extract website
-            try:
-                website_button = panel.find_element(By.CSS_SELECTOR, 'a[data-item-id="authority"]')
-                business_info['website'] = website_button.get_attribute('href')
-            except:
-                business_info['website'] = 'N/A'
-
-            # Extract category
-            try:
-                category_button = panel.find_element(By.CSS_SELECTOR, 'button[jsaction*="category"]')
-                business_info['category'] = category_button.text
-            except:
-                business_info['category'] = 'N/A'
-
-            # Extract hours (la interfaz esta en espanol: "horario", no "hours")
-            business_info['hours'] = self.extract_hours(panel)
-
-            # Extract emails
-            emails = self.extract_emails_from_gmb(panel)
-
-            # Si el negocio tiene web, siempre buscar el email ahi (antes se
-            # saltaba el 50% de las veces y se perdian leads en silencio)
-            if business_info['website'] != 'N/A':
-                self.random_delay(1, 2)
-                website_emails = self.extract_emails_from_website(business_info['website'])
-                emails.extend(website_emails)
-            
-            # Remove duplicates and validate emails
-            emails = list(set([email for email in emails if self.validate_email(email)]))
-            business_info['emails'] = emails if emails else []
-            business_info['email'] = emails[0] if emails else 'N/A'
-            
-            # Log what we extracted
-            logger.info(f"Extracted: {business_info.get('name', 'N/A')} - Rating: {business_info.get('rating', 0)} - Reviews: {business_info.get('review_count', 0)}")
-            
             # Go back to the list
             back_success = False
             if back_button:
