@@ -81,6 +81,26 @@ class GMBScraper:
         self.wait = WebDriverWait(self.driver, 20)
         self.actions = ActionChains(self.driver)
         
+    def get_detail_panel(self):
+        """Devuelve el panel de detalle del negocio abierto.
+
+        Maps renderiza dos div[role="main"]: el listado (sin aria-label o con
+        "Resultados") y la ficha abierta (aria-label = nombre del negocio).
+        Buscar en self.driver directamente toma los datos del LISTADO, que son
+        de otro negocio. Todo lo que sea especifico de la ficha debe buscarse
+        dentro de este panel.
+        """
+        try:
+            mains = self.driver.find_elements(By.CSS_SELECTOR, 'div[role="main"]')
+            panels = [m for m in mains
+                      if (m.get_attribute('aria-label') or '') not in ('', 'Resultados', 'Results')]
+            if panels:
+                return panels[-1]
+        except Exception as e:
+            logger.debug(f"No se pudo aislar el panel de detalle: {e}")
+        logger.warning("Panel de detalle no encontrado, usando el documento completo")
+        return self.driver
+
     def random_delay(self, min_seconds=1, max_seconds=3):
         """Random delay to simulate human behavior"""
         delay = random.uniform(min_seconds, max_seconds)
@@ -323,7 +343,10 @@ class GMBScraper:
                 'location': location,
                 'timestamp': datetime.now().isoformat()
             }
-            
+
+            # Aislar la ficha abierta: sin esto rating/reviews salen del listado
+            panel = self.get_detail_panel()
+
             # Extract name - try multiple selectors
             name_found = False
             name_selectors = [
@@ -359,105 +382,91 @@ class GMBScraper:
                 business_info['name'] = 'N/A'
                 logger.warning("Could not find business name")
             
-            # Extract rating
+            # Extract rating y review count (ambos viven en div.F7nice de la ficha)
             business_info['rating'] = 0.0  # Default
-            try:
-                # Try multiple methods to find rating
-                # Method 1: Look for span with stars aria-label
-                rating_spans = self.driver.find_elements(By.CSS_SELECTOR, 'span[aria-label*="star"]')
-                for span in rating_spans:
-                    aria_label = span.get_attribute('aria-label')
-                    if aria_label:
-                        rating_match = re.search(r'([\d.]+)\s*star', aria_label.lower())
-                        if rating_match:
-                            business_info['rating'] = float(rating_match.group(1))
-                            break
-                
-                # Method 2: Look for the rating number directly
-                if business_info['rating'] == 0.0:
-                    rating_texts = self.driver.find_elements(By.CSS_SELECTOR, 'span.MW4etd')
-                    for text_elem in rating_texts:
-                        try:
-                            rating = float(text_elem.text.replace(',', '.'))
-                            if 0 < rating <= 5:
-                                business_info['rating'] = rating
-                                break
-                        except:
-                            continue
-                            
-            except Exception as e:
-                logger.debug(f"Could not extract rating: {e}")
-            
-            # Extract review count
             business_info['review_count'] = 0  # Default
             try:
-                # Method 1: Look for review count in parentheses
-                review_elements = self.driver.find_elements(By.CSS_SELECTOR, 'span.UY7F9')
-                for elem in review_elements:
-                    text = elem.text
-                    # Remove parentheses and extract number
-                    text = text.replace('(', '').replace(')', '')
-                    if text.isdigit():
-                        business_info['review_count'] = int(text)
+                # Method 1: bloque de rating de la ficha: "4.9" + "(1,599)"
+                for block in panel.find_elements(By.CSS_SELECTOR, 'div.F7nice'):
+                    texto = (block.text or '').replace('\xa0', ' ')
+
+                    m = re.search(r'(\d+[.,]\d+)', texto)
+                    if m:
+                        valor = float(m.group(1).replace(',', '.'))
+                        if 0 < valor <= 5:
+                            business_info['rating'] = valor
+
+                    m = re.search(r'\(([\d.,\s]+)\)', texto)
+                    if m:
+                        digitos = re.sub(r'\D', '', m.group(1))
+                        if digitos:
+                            business_info['review_count'] = int(digitos)
+
+                    if business_info['rating'] or business_info['review_count']:
                         break
-                    elif ',' in text:
-                        business_info['review_count'] = int(text.replace(',', ''))
-                        break
-                
-                # Method 2: Look for button with reviews
+
+                # Method 2: aria-label de las estrellas y de las opiniones
+                if business_info['rating'] == 0.0:
+                    for span in panel.find_elements(By.CSS_SELECTOR, 'span[role="img"][aria-label]'):
+                        aria = span.get_attribute('aria-label') or ''
+                        m = re.search(r'([\d.,]+)\s*(?:star|estrella)', aria.lower())
+                        if m:
+                            valor = float(m.group(1).replace(',', '.'))
+                            if 0 < valor <= 5:
+                                business_info['rating'] = valor
+                                break
+
                 if business_info['review_count'] == 0:
-                    reviews_buttons = self.driver.find_elements(By.CSS_SELECTOR, 'button[jsaction*="review"]')
-                    for button in reviews_buttons:
-                        text = button.text
-                        numbers = re.findall(r'\d+', text.replace(',', ''))
-                        if numbers:
-                            business_info['review_count'] = int(numbers[0])
-                            break
-                            
+                    for elem in panel.find_elements(By.CSS_SELECTOR, '[aria-label]'):
+                        aria = (elem.get_attribute('aria-label') or '').replace('\xa0', ' ')
+                        m = re.search(r'([\d.,]+)\s*(?:opinion|opiniones|reseña|reseñas|review|reviews)', aria.lower())
+                        if m:
+                            digitos = re.sub(r'\D', '', m.group(1))
+                            if digitos:
+                                business_info['review_count'] = int(digitos)
+                                break
+
             except Exception as e:
-                logger.debug(f"Could not extract review count: {e}")
+                logger.debug(f"Could not extract rating/reviews: {e}")
             
             # Extract address
             try:
-                address_button = self.driver.find_element(By.CSS_SELECTOR, 'button[data-item-id="address"]')
+                address_button = panel.find_element(By.CSS_SELECTOR, 'button[data-item-id="address"]')
                 business_info['address'] = address_button.get_attribute('aria-label').replace('Address: ', '').replace('Dirección: ', '')
             except:
                 business_info['address'] = 'N/A'
-            
+
             # Extract phone
             try:
-                phone_button = self.driver.find_element(By.CSS_SELECTOR, 'button[data-item-id*="phone"]')
+                phone_button = panel.find_element(By.CSS_SELECTOR, 'button[data-item-id*="phone"]')
                 phone_text = phone_button.get_attribute('aria-label')
                 business_info['phone'] = phone_text.replace('Phone: ', '').replace('Teléfono: ', '')
             except:
                 business_info['phone'] = 'N/A'
-            
+
             # Extract website
             try:
-                website_button = self.driver.find_element(By.CSS_SELECTOR, 'a[data-item-id="authority"]')
+                website_button = panel.find_element(By.CSS_SELECTOR, 'a[data-item-id="authority"]')
                 business_info['website'] = website_button.get_attribute('href')
             except:
                 business_info['website'] = 'N/A'
-            
+
             # Extract category
             try:
-                category_button = self.driver.find_element(By.CSS_SELECTOR, 'button[jsaction*="category"]')
+                category_button = panel.find_element(By.CSS_SELECTOR, 'button[jsaction*="category"]')
                 business_info['category'] = category_button.text
             except:
                 business_info['category'] = 'N/A'
-            
-            # Extract hours
-            try:
-                hours_element = self.driver.find_element(By.CSS_SELECTOR, 'div[aria-label*="hours"]')
-                business_info['hours'] = hours_element.text
-            except:
-                business_info['hours'] = 'N/A'
-            
+
+            # Extract hours (la interfaz esta en espanol: "horario", no "hours")
+            business_info['hours'] = self.extract_hours(panel)
+
             # Extract emails
-            emails = self.extract_emails_from_gmb()
-            
-            # If website exists, try to extract emails from it (with random delay)
-            if business_info['website'] != 'N/A' and random.random() > 0.5:  # Only 50% of the time to avoid detection
+            emails = self.extract_emails_from_gmb(panel)
+
+            # Si el negocio tiene web, siempre buscar el email ahi (antes se
+            # saltaba el 50% de las veces y se perdian leads en silencio)
+            if business_info['website'] != 'N/A':
                 self.random_delay(1, 2)
                 website_emails = self.extract_emails_from_website(business_info['website'])
                 emails.extend(website_emails)
@@ -521,23 +530,63 @@ class GMBScraper:
             logger.error(f"Error extracting business info: {e}")
             return None
     
+    def extract_hours(self, panel):
+        """Extrae el horario de la ficha abierta.
+
+        El aria-label del bloque de horarios trae la semana completa
+        ("domingo, De 1 p.m. a 12 a.m.; lunes, ..."). Si no esta, cae al
+        estado actual visible ("Abierto - Cierra a las 12 a.m.").
+        """
+        selectores = [
+            'div.t39EBf[aria-label]',
+            '[aria-label*="Horario de atención"]',
+            '[aria-label*="horario"]',
+            '[aria-label*="Hours"]',
+            '[aria-label*="hours"]',
+        ]
+        for selector in selectores:
+            try:
+                for elem in panel.find_elements(By.CSS_SELECTOR, selector):
+                    aria = (elem.get_attribute('aria-label') or '').replace('\xa0', ' ').strip()
+                    # Descartar etiquetas de boton sin datos ("Horario de atención")
+                    if len(aria) > 20 and re.search(r'\d', aria):
+                        return re.sub(r',?\s*Copiar el horario de atención\.?', '', aria).strip()
+            except Exception:
+                continue
+
+        # Fallback: texto del estado actual
+        for selector in ['div[jsaction*="openhours"]', '.OqCZI', '.t39EBf']:
+            try:
+                for elem in panel.find_elements(By.CSS_SELECTOR, selector):
+                    texto = (elem.text or '').replace('\xa0', ' ')
+                    # Quitar glifos de iconos de Material (rango privado unicode)
+                    texto = re.sub('[\\ue000-\\uf8ff]', '', texto)
+                    texto = ' '.join(texto.split())
+                    if texto and re.search(r'\d', texto):
+                        return texto
+            except Exception:
+                continue
+
+        return 'N/A'
+
     def validate_email(self, email):
         """Validate email format"""
         email_pattern = r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$'
         return re.match(email_pattern, email.lower()) is not None
     
-    def extract_emails_from_gmb(self):
-        """Extract emails from GMB page"""
+    def extract_emails_from_gmb(self, panel=None):
+        """Extract emails from GMB page (solo de la ficha abierta)"""
         emails = []
+        scope = panel if panel is not None else self.driver
         try:
-            page_text = self.driver.find_element(By.TAG_NAME, 'body').text
-            email_pattern = r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b'
+            page_text = scope.text if panel is not None else self.driver.find_element(By.TAG_NAME, 'body').text
+            email_pattern = r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b'
             found_emails = re.findall(email_pattern, page_text)
             emails.extend(found_emails)
-            
+
             # Look for mailto links
             try:
-                mailto_links = self.driver.find_elements(By.CSS_SELECTOR, 'a[href^="mailto:"]')
+                mailto_links = scope.find_elements(By.CSS_SELECTOR, 'a[href^="mailto:"]')
                 for link in mailto_links:
                     email = link.get_attribute('href').replace('mailto:', '')
                     if email:
@@ -550,47 +599,117 @@ class GMBScraper:
         
         return emails
     
-    def extract_emails_from_website(self, url, timeout=5):
-        """Extract emails from website"""
+    # Palabras que delatan una pagina de contacto en el href o en el texto del enlace
+    CONTACT_HINTS = ['contact', 'contacto', 'contactenos', 'contactanos', 'escribenos',
+                     'nosotros', 'about', 'quienes-somos', 'ayuda', 'soporte']
+
+    # Dominios y patrones que nunca son un lead real
+    JUNK_DOMAINS = ['example.com', 'email.com', 'test.com', 'domain.com', 'sentry.io',
+                    'wixpress.com', 'godaddy.com', 'squarespace.com', 'jquery.com',
+                    'w3.org', 'schema.org', 'googleapis.com', 'gstatic.com',
+                    'wordpress.org', 'sentry.wixpress.com', 'core.com']
+    JUNK_LOCALS = ['noreply', 'no-reply', 'donotreply', 'wixpress', 'sentry', 'example',
+                   'your-email', 'youremail', 'nombre', 'usuario', 'email']
+
+    def _emails_from_html(self, html):
+        """Saca emails del texto y de los mailto de un HTML."""
         emails = []
-        
+        soup = BeautifulSoup(html, 'html.parser')
+
+        # Quitar script/style: ahi viven los emails de librerias y trackers
+        for tag in soup(['script', 'style', 'noscript']):
+            tag.decompose()
+
+        email_pattern = r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b'
+        emails.extend(re.findall(email_pattern, soup.get_text(' ')))
+
+        for link in soup.find_all('a', href=re.compile(r'^mailto:', re.I)):
+            email = link.get('href')[7:].split('?')[0].strip()
+            if email:
+                emails.append(email)
+
+        return emails, soup
+
+    def _find_contact_urls(self, soup, base_url, limit=2):
+        """Busca enlaces a paginas de contacto dentro del mismo dominio."""
+        from urllib.parse import urljoin, urlparse
+
+        base_host = urlparse(base_url).netloc.lower()
+        encontrados = []
+
+        for link in soup.find_all('a', href=True):
+            href = link['href']
+            if href.startswith(('mailto:', 'tel:', '#', 'javascript:')):
+                continue
+
+            objetivo = urljoin(base_url, href)
+            if urlparse(objetivo).netloc.lower() != base_host:
+                continue
+
+            pista = (href + ' ' + link.get_text(' ')).lower()
+            if any(h in pista for h in self.CONTACT_HINTS):
+                objetivo = objetivo.split('#')[0]
+                if objetivo not in encontrados and objetivo.rstrip('/') != base_url.rstrip('/'):
+                    encontrados.append(objetivo)
+                    if len(encontrados) >= limit:
+                        break
+
+        return encontrados
+
+    def extract_emails_from_website(self, url, timeout=8, seguir_contacto=True):
+        """Extrae emails de la web del negocio y de sus paginas de contacto."""
+        emails = []
+
         if not url or url == 'N/A':
             return emails
-            
+
+        headers = {'User-Agent': random.choice(self.user_agents)}
+
         try:
-            headers = {
-                'User-Agent': random.choice(self.user_agents)
-            }
             response = requests.get(url, headers=headers, timeout=timeout, verify=False)
-            
+
             if response.status_code == 200:
-                soup = BeautifulSoup(response.text, 'html.parser')
-                email_pattern = r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b'
-                
-                page_text = soup.get_text()
-                found_emails = re.findall(email_pattern, page_text)
-                emails.extend(found_emails)
-                
-                # Look for mailto links
-                mailto_links = soup.find_all('a', href=re.compile(r'^mailto:'))
-                for link in mailto_links:
-                    email = link.get('href').replace('mailto:', '').split('?')[0]
-                    if email:
-                        emails.append(email)
-                
+                encontrados, soup = self._emails_from_html(response.text)
+                emails.extend(encontrados)
+
+                # Si la home no dio email, probar las paginas de contacto
+                if seguir_contacto and not encontrados:
+                    for contacto in self._find_contact_urls(soup, response.url):
+                        try:
+                            self.random_delay(0.5, 1.5)
+                            r2 = requests.get(contacto, headers=headers, timeout=timeout, verify=False)
+                            if r2.status_code == 200:
+                                mas, _ = self._emails_from_html(r2.text)
+                                if mas:
+                                    logger.info(f"Emails encontrados en {contacto}")
+                                    emails.extend(mas)
+                                    break
+                        except Exception as e:
+                            logger.debug(f"Error en pagina de contacto {contacto}: {e}")
+
         except Exception as e:
             logger.debug(f"Error extracting emails from website {url}: {e}")
-        
-        # Filter generic emails
+
+        # Filtrar ruido: dominios de librerias/plataformas y buzones automaticos
         filtered_emails = []
-        generic_domains = ['example.com', 'email.com', 'test.com', 'domain.com']
-        
         for email in emails:
-            email_lower = email.lower()
-            if not any(domain in email_lower for domain in generic_domains):
-                if '@' in email and '.' in email.split('@')[1]:
-                    filtered_emails.append(email)
-        
+            email = email.strip().strip('.').lower()
+            if '@' not in email:
+                continue
+
+            local, _, dominio = email.partition('@')
+            if '.' not in dominio:
+                continue
+            if any(d in dominio for d in self.JUNK_DOMAINS):
+                continue
+            if any(j in local for j in self.JUNK_LOCALS):
+                continue
+            # Falsos positivos tipo "logo@2x.png" o "imagen@3x.jpg"
+            if re.search(r'\.(png|jpe?g|gif|svg|webp|css|js)$', email):
+                continue
+            if email not in filtered_emails:
+                filtered_emails.append(email)
+
         return filtered_emails
     
     def filter_results(self, businesses, min_rating=0, min_reviews=0, min_age_days=0, max_age_days=36500):
