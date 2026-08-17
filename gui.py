@@ -9,10 +9,7 @@ from datetime import datetime
 import queue
 import logging
 
-try:
-    from gmb_scraper import GMBScraper
-except ImportError:
-    from gmb_scraper_lite import GMBScraper
+from gmb_scraper_lite import GMBScraper
 
 from locations_peru import PERU_LOCATIONS
 

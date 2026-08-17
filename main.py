@@ -3,12 +3,7 @@ import argparse
 import json
 import sys
 
-# Try to import the regular scraper, fallback to lite version if it fails
-try:
-    from gmb_scraper import GMBScraper
-except ImportError as e:
-    print("Usando versión lite del scraper (sin undetected-chromedriver)...")
-    from gmb_scraper_lite import GMBScraper
+from gmb_scraper_lite import GMBScraper
 
 from locations_peru import PERU_LOCATIONS
 import logging

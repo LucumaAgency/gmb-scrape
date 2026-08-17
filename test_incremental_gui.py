@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Test script for incremental save functionality"""
 
-import gmb_scraper
+import gmb_scraper_lite as gmb_scraper
 import os
 
 # Create scraper instance
