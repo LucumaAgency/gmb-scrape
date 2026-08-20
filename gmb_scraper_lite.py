@@ -550,6 +550,13 @@ class GMBScraper:
                     if not href or place_id in ids_vistos:
                         continue
 
+                    # Ya extraido (en esta sesion o en una corrida previa via
+                    # --excluir): no cuenta como candidato, si no el listado se
+                    # llenaria de repetidos y la busqueda quedaria corta
+                    if place_id and place_id in self.vistos:
+                        ids_vistos.add(place_id)
+                        continue
+
                     if self.es_patrocinado(tarjeta):
                         logger.info(f"Anuncio descartado: "
                                     f"{(tarjeta.get_attribute('aria-label') or '')[:40]}")
