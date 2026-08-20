@@ -11,11 +11,13 @@ Ejemplos:
     python3 correr_campana.py --estado          # ver progreso acumulado
 """
 import argparse
+import json
+import os
 import sys
 import logging
 
 from gmb_scraper_lite import GMBScraper, BloqueoDetectado
-from progreso import RegistroProgreso
+from progreso import RegistroProgreso, HistorialVistos
 
 logger = logging.getLogger('campana')
 
@@ -38,7 +40,36 @@ def parse_args():
     p.add_argument('--progreso', default='progreso.jsonl')
     p.add_argument('--headless', action='store_true', default=True)
     p.add_argument('--estado', action='store_true', help='solo mostrar el progreso y salir')
+    p.add_argument('--vistos', default='vistos.jsonl',
+                   help='historial de negocios ya extraidos en TODAS las corridas; '
+                        'se carga y actualiza solo, para no repetir de un dia a otro')
+    p.add_argument('--sin-historial', action='store_true',
+                   help='ignorar el historial y permitir re-scrapear lo ya visto')
+    p.add_argument('--excluir', default='',
+                   help='JSON(s) de corridas previas, separados por coma: sus negocios se saltan '
+                        'sin volver a abrirlos (para pedir "otros N" del mismo rubro y distrito)')
     return p.parse_args()
+
+
+def cargar_excluidos(rutas):
+    """Devuelve las claves (place_id y nombre|direccion) de corridas previas."""
+    claves = set()
+    for ruta in [r.strip() for r in rutas.split(',') if r.strip()]:
+        if not os.path.exists(ruta):
+            print(f"Aviso: no existe {ruta}, se ignora")
+            continue
+        try:
+            with open(ruta, encoding='utf-8') as f:
+                datos = json.load(f)
+        except Exception as e:
+            print(f"Aviso: no se pudo leer {ruta} ({e})")
+            continue
+        for reg in datos:
+            if reg.get('place_id'):
+                claves.add(reg['place_id'])
+            claves.add(f"{reg.get('name','')}|{reg.get('address','')}".lower())
+        print(f"{ruta}: {len(datos)} negocios previos que no se volveran a abrir")
+    return claves
 
 
 def main():
@@ -74,6 +105,19 @@ def main():
     s.max_fichas_sesion = args.tope
     s.pausa_entre_busquedas = (pausa_min, pausa_max)
 
+    # Historial acumulado: la unica garantia de que una corrida de otro dia
+    # no vuelva a extraer los mismos negocios.
+    historial = HistorialVistos(args.vistos)
+    if args.sin_historial:
+        print("Historial DESACTIVADO: se puede re-scrapear lo ya visto")
+        historial.claves = set()
+    elif historial.negocios:
+        print(f"Historial: {historial.negocios} negocios ya extraidos que no se volveran a abrir")
+
+    s.vistos = set(historial.claves)
+    if args.excluir:
+        s.vistos |= cargar_excluidos(args.excluir)
+
     codigo = 0
     try:
         s.init_driver()
@@ -92,6 +136,9 @@ def main():
 
             if lote:
                 s.save_results_incremental(lote, args.salida, format='both', append=True)
+                if not args.sin_historial:
+                    historial.agregar(lote)
+                    s.vistos = set(historial.claves)
 
             # Si el tope corto la busqueda a la mitad, queda 'parcial' para
             # reintentarla completa en la proxima corrida.
@@ -121,6 +168,8 @@ def main():
     r = registro.resumen()
     print(f"\nSesion: {s.fichas_extraidas} fichas nuevas en {args.salida}.csv")
     print(f"Acumulado historico: {r['fichas']} fichas en {r['combinaciones']} combinaciones")
+    if not args.sin_historial:
+        print(f"Historial de negocios unicos: {historial.negocios} (en {args.vistos})")
     return codigo
 
 

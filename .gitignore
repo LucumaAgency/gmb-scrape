@@ -36,6 +36,7 @@ env/
 # Project specific
 *.csv
 *.json
+*.jsonl
 !config_example.json
 !package.json
 *.xlsx
